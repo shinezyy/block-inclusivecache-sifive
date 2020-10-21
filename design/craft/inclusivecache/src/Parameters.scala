@@ -31,7 +31,8 @@ case class CacheParameters(
   ways:        Int,
   sets:        Int,
   blockBytes:  Int,
-  beatBytes:   Int) // inner
+  beatBytes:   Int,
+  cacheName:   String) // inner
 {
   require (ways > 0)
   require (sets > 0)
@@ -152,7 +153,7 @@ case class InclusiveCacheParameters(
   val firstLevel = !inner.client.clients.exists(_.supportsProbe)
   // If we are the last level cache, we do not need to support outer-B
   val lastLevel = !outer.manager.managers.exists(_.regionType > RegionType.UNCACHED)
-  require (lastLevel)
+  // require (lastLevel)
 
   // Provision enough resources to achieve full throughput with missing single-beat accesses
   val mshrs = InclusiveCacheParameters.all_mshrs(cache, micro)
@@ -261,6 +262,8 @@ object MetaData
   def TIP:     UInt = UInt(3, width = stateBits) // we are trunk, inner masters are branch
 
   // Does a request need trunk?
+  // 只要是需要write的，那肯定就需要trunk权限
+  // 这边的trunk权限，估计不是trunk，应该是申请成为tip？
   def needT(opcode: UInt, param: UInt): Bool = {
     !opcode(2) ||
     (opcode === TLMessages.Hint && param === TLHints.PREFETCH_WRITE) ||

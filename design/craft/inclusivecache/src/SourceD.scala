@@ -223,8 +223,9 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   // s2_ready or
   // 这个条件着实有点奇怪
   // !(busy || io.req.valid)即!busy && !io.req.valid
+  // 我感觉这个的意思是，s1不会被堵住，可以直接向下流
   val s1_latch_bypass = RegNext(!(busy || io.req.valid) || s2_ready)
-  // 所以s1 bypas是被latch了，第一拍用s1 x latch
+  // 所以s1 bypass是被latch了，第一拍用s1 x latch
   val s1_bypass = Mux(s1_latch_bypass, s1_x_bypass, RegEnable(s1_x_bypass, s1_latch_bypass))
 
   // 这边的offset是啥，难道不应该直接就block对齐就可以了嘛？哪儿来的offset呢？
@@ -494,10 +495,11 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   ////////////////////////////////////// STAGE 4 //////////////////////////////////////
   // Writeback updated data
 
-  val s4_latch = s3_valid && s3_retires && s4_ready && !s3_uncached_get
+  val s4_latch = s3_valid && s3_retires && s4_ready
   val s4_full = RegInit(Bool(false))
   val s4_beat = RegEnable(s3_beat, s4_latch)
   val s4_need_r = RegEnable(s3_need_r, s4_latch)
+  val s4_uncached_get = RegEnable(s3_uncached_get, s4_latch)
   val s4_need_bs = RegEnable(s3_need_bs, s4_latch)
   val s4_need_pb = RegEnable(s3_need_pb, s4_latch)
   val s4_req = RegEnable(s3_req, s4_latch)
@@ -551,16 +553,20 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   val s5_req  = RegEnable(s4_req,  retire)
   val s5_beat = RegEnable(s4_beat, retire)
   val s5_dat  = RegEnable(atomics.io.data_out, retire)
+  val s5_uncached_get  = RegEnable(s4_uncached_get, retire)
 
   val s6_req  = RegEnable(s5_req,  retire)
   val s6_beat = RegEnable(s5_beat, retire)
   val s6_dat  = RegEnable(s5_dat,  retire)
+  val s6_uncached_get  = RegEnable(s5_uncached_get, retire)
 
   val s7_dat  = RegEnable(s6_dat,  retire)
+  val s7_uncached_get  = RegEnable(s6_uncached_get, retire)
 
   ////////////////////////////////////// BYPASSS //////////////////////////////////////
   // 这边的bypass是在哪些级之间进行bypass啊？
 
+  // 这句注释啥意思？
   // Manually retime this circuit to pull a register stage forward
   val pre_s3_req  = Mux(s3_latch, s2_req,  s3_req)
   val pre_s4_req  = Mux(s4_latch, s3_req,  s4_req)
@@ -575,9 +581,15 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   val pre_s7_dat  = Mux(retire,   s6_dat,  s7_dat)
   val pre_s4_full = s4_latch || (!(io.bs_wadr.ready || !s4_need_bs) && s4_full)
 
-  val pre_s3_4_match  = pre_s4_req.set === pre_s3_req.set && pre_s4_req.way === pre_s3_req.way && pre_s4_beat === pre_s3_beat && pre_s4_full
-  val pre_s3_5_match  = pre_s5_req.set === pre_s3_req.set && pre_s5_req.way === pre_s3_req.way && pre_s5_beat === pre_s3_beat
-  val pre_s3_6_match  = pre_s6_req.set === pre_s3_req.set && pre_s6_req.way === pre_s3_req.way && pre_s6_beat === pre_s3_beat
+  // TODO: change this
+  // 这边的bypass到底是怎么搞的啊？
+  // 我还有点看不太懂
+  // 这里的bypass的data是从4,5,6,7级bypass到s3
+  // 然后标记bypass信号，是检查s1与2,3,4，这个我还不知道是为啥
+  // 反正我们不管三七二十一，只要是uncached get，就不进行任何数据bypass
+  val pre_s3_4_match  = pre_s4_req.set === pre_s3_req.set && pre_s4_req.way === pre_s3_req.way && pre_s4_beat === pre_s3_beat && pre_s4_full && !s3_uncached_get && !s4_uncached_get
+  val pre_s3_5_match  = pre_s5_req.set === pre_s3_req.set && pre_s5_req.way === pre_s3_req.way && pre_s5_beat === pre_s3_beat && !s3_uncached_get && !s5_uncached_get
+  val pre_s3_6_match  = pre_s6_req.set === pre_s3_req.set && pre_s6_req.way === pre_s3_req.way && pre_s6_beat === pre_s3_beat && !s3_uncached_get && !s6_uncached_get
 
   val pre_s3_4_bypass = Mux(pre_s3_4_match, MaskGen(pre_s4_req.offset, pre_s4_req.size, beatBytes, writeBytes), UInt(0))
   val pre_s3_5_bypass = Mux(pre_s3_5_match, MaskGen(pre_s5_req.offset, pre_s5_req.size, beatBytes, writeBytes), UInt(0))
@@ -591,9 +603,10 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
 
   // Detect which parts of s1 will be bypassed from later pipeline stages (s1-s4)
   // Note: we also bypass from reads ahead in the pipeline to save power
-  val s1_2_match  = s2_req.set === s1_req.set && s2_req.way === s1_req.way && s2_beat === s1_beat && s2_full && s2_retires
-  val s1_3_match  = s3_req.set === s1_req.set && s3_req.way === s1_req.way && s3_beat === s1_beat && s3_full && s3_retires
-  val s1_4_match  = s4_req.set === s1_req.set && s4_req.way === s1_req.way && s4_beat === s1_beat && s4_full
+  // TODO: change this
+  val s1_2_match  = s2_req.set === s1_req.set && s2_req.way === s1_req.way && s2_beat === s1_beat && s2_full && s2_retires && !s1_uncached_get && !s2_uncached_get
+  val s1_3_match  = s3_req.set === s1_req.set && s3_req.way === s1_req.way && s3_beat === s1_beat && s3_full && s3_retires && !s1_uncached_get && !s3_uncached_get
+  val s1_4_match  = s4_req.set === s1_req.set && s4_req.way === s1_req.way && s4_beat === s1_beat && s4_full && !s1_uncached_get && !s4_uncached_get
 
   for (i <- 0 until 8) {
     val cover = UInt(i)

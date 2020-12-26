@@ -25,9 +25,10 @@ import freechips.rocketchip.util._
 class GrantBufferDEntry(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
   val data = UInt(width = params.inner.bundle.dataBits)
+  val param = UInt(width = 3)
   def dump() = {
-    DebugPrint(params, "GrantBufferDEntry: data: %x\n",
-      data)
+    DebugPrint(params, "GrantBufferDEntry: data: %x param: %x\n",
+      data, param)
   }
 }
 
@@ -50,9 +51,10 @@ class GrantBufferPush(params: InclusiveCacheParameters) extends InclusiveCacheBu
   val index = UInt(width = params.putBits)
   val beat = UInt(width = log2Up(nBeats))
   val data = UInt(width = params.inner.bundle.dataBits)
+  val param = UInt(width = 3)
   def dump() = {
-    DebugPrint(params, "GrantBufferPush: index: %d beat: %d data: %x\n",
-      index, beat, data)
+    DebugPrint(params, "GrantBufferPush: index: %d beat: %d data: %x param: %x\n",
+      index, beat, data, param)
   }
 }
 
@@ -79,6 +81,7 @@ class GrantBuffer(params: InclusiveCacheParameters) extends Module
   }
   val nBeats = params.cache.blockBytes * 8 / params.inner.bundle.dataBits
   val buffer = Reg(Vec(params.grantLists, Vec(nBeats, UInt(width = params.inner.bundle.dataBits))))
+  val param = Reg(Vec(params.grantLists, Vec(nBeats, UInt(width = 3))))
 
   // list allocation and free
   val lists = RegInit(UInt(0, width = params.grantLists))
@@ -107,14 +110,17 @@ class GrantBuffer(params: InclusiveCacheParameters) extends Module
   io.push.ready := true.B
   when (io.push.fire()) {
     buffer(push.index)(push.beat) := push.data
+    param(push.index)(push.beat) := push.param
   }
 
   // pop data beat
   val pop = io.pop.bits
   io.pop.ready := true.B
   io.beat.data := 0.U
+  io.beat.param := 0.U
   when (io.pop.fire()) {
     io.beat.data := buffer(pop.index)(pop.beat)
+    io.beat.param := param(pop.index)(pop.beat)
   }
 
   // dump
@@ -128,8 +134,7 @@ class GrantBuffer(params: InclusiveCacheParameters) extends Module
 
   when (io.pop.fire()) {
     io.pop.bits.dump()
-    DebugPrint(params, "GrantBufferPop: data: %x\n",
-      io.beat.data)
+    io.beat.dump()
   }
 }
 
@@ -304,6 +309,7 @@ class SinkD(params: InclusiveCacheParameters) extends Module with HasTLDump
   grantbuffer.io.push.bits.index := RegNext(grant)
   grantbuffer.io.push.bits.beat := RegNext(beat >> splitBits)
   grantbuffer.io.push.bits.data := fullBeat
+  grantbuffer.io.push.bits.param := RegNext(d.bits.param)
 
   when (d.fire()) {
     DebugPrint(params, "sinkD first: %b uncache: %b hasData: %b beatFull: %b\n",

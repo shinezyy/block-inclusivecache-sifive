@@ -362,6 +362,8 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   s2_pdata_raw.data    := Mux(s2_req.prio(0),
     Mux(s2_uncached_get, io.gnt_beat.data, io.pb_beat.data),
     io.rel_beat.data)
+  val s2_uncached_get_param = io.gnt_beat.param
+
   // 只有sinkA那里来的数据有mask吗？
   s2_pdata_raw.mask    := Mux(s2_req.prio(0) && !s2_uncached_get, io.pb_beat.mask, ~UInt(0, width = params.inner.manager.beatBytes))
   s2_pdata_raw.corrupt := Mux(s2_req.prio(0),
@@ -410,8 +412,8 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   s2_ready := !s2_full || (s3_ready && (!s2_valid_pb || pb_ready))
 
   when (s2_valid) {
-    DebugPrint(params, "SourceD s2: s2_latch: %x, s2_full: %x, s2_valid_pb: %x, s2_beat: %x, s2_bypass: %x, s2_req_source: %x, s2_last: %x, s2_need_r: %x, s2_need_pb: %x, s2_retires: %x, s2_need_d: %x, s2_pdata_raw_data: %x, s2_pdata_data: %x, s2_uncached_get: %x, s2_valid: %x, s2_ready: %x\n",
-      s2_latch, s2_full, s2_valid_pb, s2_beat, s2_bypass, s2_req.source, s2_last, s2_need_r, s2_need_pb, s2_retires, s2_need_d, s2_pdata_raw.data, s2_pdata.data, s2_uncached_get, s2_valid, s2_ready)
+    DebugPrint(params, "SourceD s2: s2_latch: %x, s2_full: %x, s2_valid_pb: %x, s2_beat: %x, s2_bypass: %x, s2_req_source: %x, s2_last: %x, s2_need_r: %x, s2_need_pb: %x, s2_retires: %x, s2_need_d: %x, s2_pdata_raw_data: %x, s2_pdata_data: %x, s2_uncached_get: %x, s2_uncached_get_param: %x, s2_valid: %x, s2_ready: %x\n",
+      s2_latch, s2_full, s2_valid_pb, s2_beat, s2_bypass, s2_req.source, s2_last, s2_need_r, s2_need_pb, s2_retires, s2_need_d, s2_pdata_raw.data, s2_pdata.data, s2_uncached_get, s2_uncached_get_param, s2_valid, s2_ready)
   }
   when (s2_valid) {
     assert(!(s2_uncached_get && s2_bypass.orR))
@@ -449,6 +451,7 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   def bypass(sel: UInt, x: UInt, y: UInt) =
     (chop(sel) zip (chunk(x) zip chunk(y))) .map { case (s, (x, y)) => Mux(s, x, y) } .asUInt
   val s3_rdata = Mux(s3_uncached_get, s3_pdata.data, bypass(s3_bypass, s3_bypass_data, queue.io.deq.bits.data))
+  val s3_uncached_get_param = RegEnable(s2_uncached_get_param, s3_latch)
 
   // Lookup table for response codes
   val grant = Mux(s3_req.param === BtoT, Grant, GrantData)
@@ -461,7 +464,9 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   // s3 valid d，s3现在放到d上的message是否是valid
   d.valid := s3_valid_d
   d.bits.opcode  := Mux(s3_req.prio(0), resp_opcode(s3_req.opcode), ReleaseAck)
-  d.bits.param   := Mux(s3_req.prio(0) && s3_acq, Mux(s3_req.param =/= NtoB, toT, toB), UInt(0))
+  d.bits.param   := Mux(s3_req.prio(0) && s3_acq,
+    Mux(s3_req.param =/= NtoB, toT, toB),
+    Mux(s3_uncached_get, s3_uncached_get_param, UInt(0)))
   d.bits.size    := s3_req.size
   d.bits.source  := s3_req.source
   d.bits.sink    := s3_req.sink
@@ -470,8 +475,8 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   d.bits.corrupt := s3_req.bad && d.bits.opcode(0)
 
   when (s3_valid) {
-    DebugPrint(params, "SourceD s3: s3_latch: %x, s3_full: %x, s3_valid_d: %x, s3_uncached_get: %x, s3_beat: %x, s3_bypass: %x, s3_req_source: %x, s3_adjusted_opcode: %x, s3_last: %x, s3_pdata_data: %x, s3_need_pb: %x, s3_retires: %x, s3_need_r: %x, s3_need_bs: %x, s3_acq: %x, s3_bypass_data: %x, s3_rdata: %x, grant: %x\n",
-      s3_latch, s3_full, s3_valid_d, s3_uncached_get, s3_beat, s3_bypass, s3_req.source, s3_adjusted_opcode, s3_last, s3_pdata.data, s3_need_pb, s3_retires, s3_need_r, s3_need_bs, s3_acq, s3_bypass_data, s3_rdata, grant)
+    DebugPrint(params, "SourceD s3: s3_latch: %x, s3_full: %x, s3_valid_d: %x, s3_uncached_get: %x, s3_uncached_get_param: %x, s3_beat: %x, s3_bypass: %x, s3_req_source: %x, s3_adjusted_opcode: %x, s3_last: %x, s3_pdata_data: %x, s3_need_pb: %x, s3_retires: %x, s3_need_r: %x, s3_need_bs: %x, s3_acq: %x, s3_bypass_data: %x, s3_rdata: %x, grant: %x\n",
+      s3_latch, s3_full, s3_valid_d, s3_uncached_get, s3_uncached_get_param, s3_beat, s3_bypass, s3_req.source, s3_adjusted_opcode, s3_last, s3_pdata.data, s3_need_pb, s3_retires, s3_need_r, s3_need_bs, s3_acq, s3_bypass_data, s3_rdata, grant)
   }
   when (s3_valid) {
     assert(!(s3_uncached_get && s3_bypass.orR))

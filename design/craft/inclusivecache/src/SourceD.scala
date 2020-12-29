@@ -577,10 +577,17 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   val pre_s4_req  = Mux(s4_latch, s3_req,  s4_req)
   val pre_s5_req  = Mux(retire,   s4_req,  s5_req)
   val pre_s6_req  = Mux(retire,   s5_req,  s6_req)
+
   val pre_s3_beat = Mux(s3_latch, s2_beat, s3_beat)
   val pre_s4_beat = Mux(s4_latch, s3_beat, s4_beat)
   val pre_s5_beat = Mux(retire,   s4_beat, s5_beat)
   val pre_s6_beat = Mux(retire,   s5_beat, s6_beat)
+
+  val pre_s3_uncached_get  = Mux(s3_latch, s2_uncached_get,  s3_uncached_get)
+  val pre_s4_uncached_get  = Mux(s4_latch, s3_uncached_get,  s4_uncached_get)
+  val pre_s5_uncached_get  = Mux(retire,   s4_uncached_get,  s5_uncached_get)
+  val pre_s6_uncached_get  = Mux(retire,   s5_uncached_get,  s6_uncached_get)
+
   val pre_s5_dat  = Mux(retire,   atomics.io.data_out, s5_dat)
   val pre_s6_dat  = Mux(retire,   s5_dat,  s6_dat)
   val pre_s7_dat  = Mux(retire,   s6_dat,  s7_dat)
@@ -592,9 +599,11 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   // 这里的bypass的data是从4,5,6,7级bypass到s3
   // 然后标记bypass信号，是检查s1与2,3,4，这个我还不知道是为啥
   // 反正我们不管三七二十一，只要是uncached get，就不进行任何数据bypass
-  val pre_s3_4_match  = pre_s4_req.set === pre_s3_req.set && pre_s4_req.way === pre_s3_req.way && pre_s4_beat === pre_s3_beat && pre_s4_full && !s3_uncached_get && !s4_uncached_get
-  val pre_s3_5_match  = pre_s5_req.set === pre_s3_req.set && pre_s5_req.way === pre_s3_req.way && pre_s5_beat === pre_s3_beat && !s3_uncached_get && !s5_uncached_get
-  val pre_s3_6_match  = pre_s6_req.set === pre_s3_req.set && pre_s6_req.way === pre_s3_req.way && pre_s6_beat === pre_s3_beat && !s3_uncached_get && !s6_uncached_get
+  val pre_s3_4_match  = pre_s4_req.set === pre_s3_req.set && pre_s4_req.way === pre_s3_req.way && pre_s4_beat === pre_s3_beat && pre_s4_full && !pre_s3_uncached_get && !pre_s4_uncached_get
+  val pre_s3_5_match  = pre_s5_req.set === pre_s3_req.set && pre_s5_req.way === pre_s3_req.way && pre_s5_beat === pre_s3_beat && !pre_s3_uncached_get && !pre_s5_uncached_get
+  val pre_s3_6_match  = pre_s6_req.set === pre_s3_req.set && pre_s6_req.way === pre_s3_req.way && pre_s6_beat === pre_s3_beat && !pre_s3_uncached_get && !pre_s6_uncached_get
+
+
 
   val pre_s3_4_bypass = Mux(pre_s3_4_match, MaskGen(pre_s4_req.offset, pre_s4_req.size, beatBytes, writeBytes), UInt(0))
   val pre_s3_5_bypass = Mux(pre_s3_5_match, MaskGen(pre_s5_req.offset, pre_s5_req.size, beatBytes, writeBytes), UInt(0))

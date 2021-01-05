@@ -362,6 +362,8 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   s2_pdata_raw.data    := Mux(s2_req.prio(0),
     Mux(s2_uncached_get, io.gnt_beat.data, io.pb_beat.data),
     io.rel_beat.data)
+  val s2_uncached_get_param = io.gnt_beat.param
+
   // 只有sinkA那里来的数据有mask吗？
   s2_pdata_raw.mask    := Mux(s2_req.prio(0) && !s2_uncached_get, io.pb_beat.mask, ~UInt(0, width = params.inner.manager.beatBytes))
   s2_pdata_raw.corrupt := Mux(s2_req.prio(0),
@@ -410,8 +412,8 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   s2_ready := !s2_full || (s3_ready && (!s2_valid_pb || pb_ready))
 
   when (s2_valid) {
-    DebugPrint(params, "SourceD s2: s2_latch: %x, s2_full: %x, s2_valid_pb: %x, s2_beat: %x, s2_bypass: %x, s2_req_source: %x, s2_last: %x, s2_need_r: %x, s2_need_pb: %x, s2_retires: %x, s2_need_d: %x, s2_pdata_raw_data: %x, s2_pdata_data: %x, s2_uncached_get: %x, s2_valid: %x, s2_ready: %x\n",
-      s2_latch, s2_full, s2_valid_pb, s2_beat, s2_bypass, s2_req.source, s2_last, s2_need_r, s2_need_pb, s2_retires, s2_need_d, s2_pdata_raw.data, s2_pdata.data, s2_uncached_get, s2_valid, s2_ready)
+    DebugPrint(params, "SourceD s2: s2_latch: %x, s2_full: %x, s2_valid_pb: %x, s2_beat: %x, s2_bypass: %x, s2_req_source: %x, s2_last: %x, s2_need_r: %x, s2_need_pb: %x, s2_retires: %x, s2_need_d: %x, s2_pdata_raw_data: %x, s2_pdata_data: %x, s2_uncached_get: %x, s2_uncached_get_param: %x, s2_valid: %x, s2_ready: %x\n",
+      s2_latch, s2_full, s2_valid_pb, s2_beat, s2_bypass, s2_req.source, s2_last, s2_need_r, s2_need_pb, s2_retires, s2_need_d, s2_pdata_raw.data, s2_pdata.data, s2_uncached_get, s2_uncached_get_param, s2_valid, s2_ready)
   }
   when (s2_valid) {
     assert(!(s2_uncached_get && s2_bypass.orR))
@@ -449,6 +451,7 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   def bypass(sel: UInt, x: UInt, y: UInt) =
     (chop(sel) zip (chunk(x) zip chunk(y))) .map { case (s, (x, y)) => Mux(s, x, y) } .asUInt
   val s3_rdata = Mux(s3_uncached_get, s3_pdata.data, bypass(s3_bypass, s3_bypass_data, queue.io.deq.bits.data))
+  val s3_uncached_get_param = RegEnable(s2_uncached_get_param, s3_latch)
 
   // Lookup table for response codes
   val grant = Mux(s3_req.param === BtoT, Grant, GrantData)
@@ -461,7 +464,9 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   // s3 valid d，s3现在放到d上的message是否是valid
   d.valid := s3_valid_d
   d.bits.opcode  := Mux(s3_req.prio(0), resp_opcode(s3_req.opcode), ReleaseAck)
-  d.bits.param   := Mux(s3_req.prio(0) && s3_acq, Mux(s3_req.param =/= NtoB, toT, toB), UInt(0))
+  d.bits.param   := Mux(s3_req.prio(0) && s3_acq,
+    Mux(s3_req.param =/= NtoB, toT, toB),
+    Mux(s3_uncached_get, s3_uncached_get_param, UInt(0)))
   d.bits.size    := s3_req.size
   d.bits.source  := s3_req.source
   d.bits.sink    := s3_req.sink
@@ -470,8 +475,8 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   d.bits.corrupt := s3_req.bad && d.bits.opcode(0)
 
   when (s3_valid) {
-    DebugPrint(params, "SourceD s3: s3_latch: %x, s3_full: %x, s3_valid_d: %x, s3_uncached_get: %x, s3_beat: %x, s3_bypass: %x, s3_req_source: %x, s3_adjusted_opcode: %x, s3_last: %x, s3_pdata_data: %x, s3_need_pb: %x, s3_retires: %x, s3_need_r: %x, s3_need_bs: %x, s3_acq: %x, s3_bypass_data: %x, s3_rdata: %x, grant: %x\n",
-      s3_latch, s3_full, s3_valid_d, s3_uncached_get, s3_beat, s3_bypass, s3_req.source, s3_adjusted_opcode, s3_last, s3_pdata.data, s3_need_pb, s3_retires, s3_need_r, s3_need_bs, s3_acq, s3_bypass_data, s3_rdata, grant)
+    DebugPrint(params, "SourceD s3: s3_latch: %x, s3_full: %x, s3_valid_d: %x, s3_uncached_get: %x, s3_uncached_get_param: %x, s3_beat: %x, s3_bypass: %x, s3_req_source: %x, s3_adjusted_opcode: %x, s3_last: %x, s3_pdata_data: %x, s3_need_pb: %x, s3_retires: %x, s3_need_r: %x, s3_need_bs: %x, s3_acq: %x, s3_bypass_data: %x, s3_rdata: %x, grant: %x\n",
+      s3_latch, s3_full, s3_valid_d, s3_uncached_get, s3_uncached_get_param, s3_beat, s3_bypass, s3_req.source, s3_adjusted_opcode, s3_last, s3_pdata.data, s3_need_pb, s3_retires, s3_need_r, s3_need_bs, s3_acq, s3_bypass_data, s3_rdata, grant)
   }
   when (s3_valid) {
     assert(!(s3_uncached_get && s3_bypass.orR))
@@ -506,6 +511,13 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   val s4_adjusted_opcode = RegEnable(s3_adjusted_opcode, s4_latch)
   val s4_pdata = RegEnable(s3_pdata, s4_latch)
   val s4_rdata = RegEnable(s3_rdata, s4_latch)
+
+  when (s4_full) {
+    DebugPrint(params, "SourceD s4: s4_beat: %x, s4_need_r: %x, s4_uncached_get: %x, s4_need_bs: %x, s4_need_pb: %x, s4_adjusted_opcode: %x, s4_pdata_data: %x, s4_rdata: %x\n",
+      s4_beat, s4_need_r, s4_uncached_get, s4_need_bs, s4_need_pb, s4_adjusted_opcode, s4_pdata.data, s4_rdata)
+    DebugPrint(params, "SourceD s4: prio: %x control: %b opcode: %x param: %x size: %x source: %x tag: %x set: %x offset: %x put: %x sink: %x way: %x\n",
+      s4_req.prio.asUInt, s4_req.control, s4_req.opcode, s4_req.param, s4_req.size, s4_req.source, s4_req.tag, s4_req.set, s4_req.offset, s4_req.put, s4_req.sink, s4_req.way)
+  }
 
   val atomics = Module(new Atomics(params.inner.bundle))
   atomics.io.write     := s4_req.prio(2)
@@ -549,6 +561,9 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   // We need 3 slots to collect what was in s2, s3, s4 when the request was in s1
   // ... you can't rely on s4 being full if bubbles got introduced between s1 and s2
   val retire = s4_full && (io.bs_wadr.ready || !s4_need_bs)
+  when (retire) {
+    DebugPrint(params, "SourceD retire\n")
+  }
 
   val s5_req  = RegEnable(s4_req,  retire)
   val s5_beat = RegEnable(s4_beat, retire)
@@ -563,19 +578,40 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   val s7_dat  = RegEnable(s6_dat,  retire)
   val s7_uncached_get  = RegEnable(s6_uncached_get, retire)
 
+  when (RegNext(retire)) {
+    DebugPrint(params, "SourceD s5: prio: %x control: %b opcode: %x param: %x size: %x source: %x tag: %x set: %x offset: %x put: %x sink: %x way: %x beat: %d data: %x uncached_get: %b\n",
+      s5_req.prio.asUInt, s5_req.control, s5_req.opcode, s5_req.param, s5_req.size, s5_req.source, s5_req.tag, s5_req.set, s5_req.offset, s5_req.put, s5_req.sink, s5_req.way, s5_beat, s5_dat, s5_uncached_get)
+
+    DebugPrint(params, "SourceD s6: prio: %x control: %b opcode: %x param: %x size: %x source: %x tag: %x set: %x offset: %x put: %x sink: %x way: %x beat: %d data: %x uncached_get: %b\n",
+      s6_req.prio.asUInt, s6_req.control, s6_req.opcode, s6_req.param, s6_req.size, s6_req.source, s6_req.tag, s6_req.set, s6_req.offset, s6_req.put, s6_req.sink, s6_req.way, s6_beat, s6_dat, s6_uncached_get)
+
+    DebugPrint(params, "SourceD s7: data: %x uncached_get: %b\n",
+      s7_dat, s7_uncached_get)
+  }
+
   ////////////////////////////////////// BYPASSS //////////////////////////////////////
   // 这边的bypass是在哪些级之间进行bypass啊？
 
   // 这句注释啥意思？
   // Manually retime this circuit to pull a register stage forward
+  // 这边pre的意思是要进s3但是还没进s3的req？
+  // 这边为啥要用pre呢？为啥不能直接拉寄存器过来比呢？
+  // 这边写的retime？是因为时序原因吗？why？
   val pre_s3_req  = Mux(s3_latch, s2_req,  s3_req)
   val pre_s4_req  = Mux(s4_latch, s3_req,  s4_req)
   val pre_s5_req  = Mux(retire,   s4_req,  s5_req)
   val pre_s6_req  = Mux(retire,   s5_req,  s6_req)
+
   val pre_s3_beat = Mux(s3_latch, s2_beat, s3_beat)
   val pre_s4_beat = Mux(s4_latch, s3_beat, s4_beat)
   val pre_s5_beat = Mux(retire,   s4_beat, s5_beat)
   val pre_s6_beat = Mux(retire,   s5_beat, s6_beat)
+
+  val pre_s3_uncached_get  = Mux(s3_latch, s2_uncached_get,  s3_uncached_get)
+  val pre_s4_uncached_get  = Mux(s4_latch, s3_uncached_get,  s4_uncached_get)
+  val pre_s5_uncached_get  = Mux(retire,   s4_uncached_get,  s5_uncached_get)
+  val pre_s6_uncached_get  = Mux(retire,   s5_uncached_get,  s6_uncached_get)
+
   val pre_s5_dat  = Mux(retire,   atomics.io.data_out, s5_dat)
   val pre_s6_dat  = Mux(retire,   s5_dat,  s6_dat)
   val pre_s7_dat  = Mux(retire,   s6_dat,  s7_dat)
@@ -587,13 +623,21 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   // 这里的bypass的data是从4,5,6,7级bypass到s3
   // 然后标记bypass信号，是检查s1与2,3,4，这个我还不知道是为啥
   // 反正我们不管三七二十一，只要是uncached get，就不进行任何数据bypass
-  val pre_s3_4_match  = pre_s4_req.set === pre_s3_req.set && pre_s4_req.way === pre_s3_req.way && pre_s4_beat === pre_s3_beat && pre_s4_full && !s3_uncached_get && !s4_uncached_get
-  val pre_s3_5_match  = pre_s5_req.set === pre_s3_req.set && pre_s5_req.way === pre_s3_req.way && pre_s5_beat === pre_s3_beat && !s3_uncached_get && !s5_uncached_get
-  val pre_s3_6_match  = pre_s6_req.set === pre_s3_req.set && pre_s6_req.way === pre_s3_req.way && pre_s6_beat === pre_s3_beat && !s3_uncached_get && !s6_uncached_get
+  val pre_s3_4_match  = pre_s4_req.set === pre_s3_req.set && pre_s4_req.way === pre_s3_req.way && pre_s4_beat === pre_s3_beat && pre_s4_full && !pre_s3_uncached_get && !pre_s4_uncached_get
+  val pre_s3_5_match  = pre_s5_req.set === pre_s3_req.set && pre_s5_req.way === pre_s3_req.way && pre_s5_beat === pre_s3_beat && !pre_s3_uncached_get && !pre_s5_uncached_get
+  val pre_s3_6_match  = pre_s6_req.set === pre_s3_req.set && pre_s6_req.way === pre_s3_req.way && pre_s6_beat === pre_s3_beat && !pre_s3_uncached_get && !pre_s6_uncached_get
+
+
 
   val pre_s3_4_bypass = Mux(pre_s3_4_match, MaskGen(pre_s4_req.offset, pre_s4_req.size, beatBytes, writeBytes), UInt(0))
   val pre_s3_5_bypass = Mux(pre_s3_5_match, MaskGen(pre_s5_req.offset, pre_s5_req.size, beatBytes, writeBytes), UInt(0))
   val pre_s3_6_bypass = Mux(pre_s3_6_match, MaskGen(pre_s6_req.offset, pre_s6_req.size, beatBytes, writeBytes), UInt(0))
+
+  DebugPrint(params, "SourceD pre_s3_4_match: %b pre_s3_5_match: %b, pre_s3_6_match: %b\n",
+    pre_s3_4_match, pre_s3_5_match, pre_s3_6_match)
+
+  DebugPrint(params, "SourceD pre_s3_4_bypass: %b pre_s3_5_bypass: %b, pre_s3_6_bypass: %b\n",
+    pre_s3_4_bypass, pre_s3_5_bypass, pre_s3_6_bypass)
 
   s3_bypass_data :=
     bypass(RegNext(pre_s3_4_bypass), atomics.io.data_out, RegNext(
@@ -607,6 +651,9 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   val s1_2_match  = s2_req.set === s1_req.set && s2_req.way === s1_req.way && s2_beat === s1_beat && s2_full && s2_retires && !s1_uncached_get && !s2_uncached_get
   val s1_3_match  = s3_req.set === s1_req.set && s3_req.way === s1_req.way && s3_beat === s1_beat && s3_full && s3_retires && !s1_uncached_get && !s3_uncached_get
   val s1_4_match  = s4_req.set === s1_req.set && s4_req.way === s1_req.way && s4_beat === s1_beat && s4_full && !s1_uncached_get && !s4_uncached_get
+
+  DebugPrint(params, "SourceD s1_2_match: %b s1_3_match: %b, s1_4_match: %b\n",
+    s1_2_match, s1_3_match, s1_4_match)
 
   for (i <- 0 until 8) {
     val cover = UInt(i)

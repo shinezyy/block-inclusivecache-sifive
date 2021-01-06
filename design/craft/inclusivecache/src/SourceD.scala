@@ -357,12 +357,12 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   val s2_uncached_get = RegEnable(s1_uncached_get, s2_latch)
   val s2_pdata_raw = Wire(new PutBufferACEntry(params))
   val s2_pdata = s2_pdata_raw holdUnless s2_valid_pb
+  val s2_uncached_get_param = io.gnt_beat.param holdUnless s2_valid_pb
 
   // 从SinkA, SinkC, SinkD那里把put buffer的值拿出来
   s2_pdata_raw.data    := Mux(s2_req.prio(0),
     Mux(s2_uncached_get, io.gnt_beat.data, io.pb_beat.data),
     io.rel_beat.data)
-  val s2_uncached_get_param = io.gnt_beat.param
 
   // 只有sinkA那里来的数据有mask吗？
   s2_pdata_raw.mask    := Mux(s2_req.prio(0) && !s2_uncached_get, io.pb_beat.mask, ~UInt(0, width = params.inner.manager.beatBytes))

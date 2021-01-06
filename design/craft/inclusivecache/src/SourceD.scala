@@ -466,7 +466,8 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   d.bits.opcode  := Mux(s3_req.prio(0), resp_opcode(s3_req.opcode), ReleaseAck)
   d.bits.param   := Mux(s3_req.prio(0) && s3_acq,
     Mux(s3_req.param =/= NtoB, toT, toB),
-    Mux(s3_uncached_get, s3_uncached_get_param, UInt(0)))
+    if (params.verification) Mux(s3_uncached_get, s3_uncached_get_param, UInt(0))
+    else UInt(0))
   d.bits.size    := s3_req.size
   d.bits.source  := s3_req.source
   d.bits.sink    := s3_req.sink

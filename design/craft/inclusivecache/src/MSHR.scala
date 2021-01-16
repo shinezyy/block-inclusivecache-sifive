@@ -402,6 +402,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   val req_clientBit = params.clientBit(request.source)
   val req_needT = needT(request.opcode, request.param)
   val req_acquire = request.opcode === AcquireBlock || request.opcode === AcquirePerm
+  val req_hint = request.opcode === Hint
   val meta_no_clients = !meta.clients.orR
   val req_promoteT = req_acquire && Mux(meta.hit, meta_no_clients && meta.state === TIP, gotT)
 
@@ -425,6 +426,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
         // 同时要把hit给改成false
         // 以应对后面的chained request
         final_meta_writeback.hit := Bool(false)
+        final_meta_writeback.prefetch_hit := Bool(false)
       } .elsewhen (outer_probe_toB && meta.state === TRUNK) {
         // 如果是toB的话，只有可能是从trunk或者tip toB
         // 只有trunk的toB，要看client的probeAck是不是toN，来更新client
@@ -440,6 +442,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
       final_meta_writeback.clients := meta.clients & ~probes_toN
     }
     final_meta_writeback.hit := Bool(false)
+    final_meta_writeback.prefetch_hit := Bool(false)
   } .otherwise {
     // for uncached get, we do not change meta data
     when (!uncached_get) {
@@ -456,6 +459,9 @@ class MSHR(params: InclusiveCacheParameters) extends Module
                                       Mux(req_acquire, req_clientBit, UInt(0))
       final_meta_writeback.tag := request.tag
       final_meta_writeback.hit := Bool(true)
+      when (!meta.hit) {
+        final_meta_writeback.prefetch_hit := req_hint
+      }
     }
   }
 
@@ -844,7 +850,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     io.prefetcherAcquire.valid := dcacheRead || dcacheWrite
     io.prefetcherAcquire.bits.address       := params.expandAddress(new_request.tag, new_request.set, UInt(0))
     io.prefetcherAcquire.bits.write         := dcacheWrite
-    io.prefetcherAcquire.bits.hit           := new_meta.hit
+    io.prefetcherAcquire.bits.hit           := new_meta.prefetch_hit
 
     meta_valid := Bool(true)
     meta := new_meta

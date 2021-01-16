@@ -26,6 +26,7 @@ import MetaData._
 class DirectoryEntry(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
   val dirty   = Bool() // true => TRUNK or TIP
+  val prefetch_hit = Bool() // true => TRUNK or TIP
   val state   = UInt(width = params.stateBits)
   val clients = UInt(width = params.clientBits)
   val tag     = UInt(width = params.tagBits)

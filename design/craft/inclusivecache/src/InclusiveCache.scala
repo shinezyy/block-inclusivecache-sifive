@@ -228,7 +228,9 @@ class InclusiveCache(
     // and now, to simplify implementation
     // we do not want prefetcher feedback port to back pressure L2
     // so we can have only one scheduler
-    require(mods.length == 1)
+    if (cache.level == 2) {
+      require(mods.length == 1)
+    }
     io <> mods(0).io.prefetcher
 
     def json = s"""{"banks":[${mods.map(_.json).mkString(",")}]"""

@@ -236,7 +236,7 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   val s1_mask = MaskGen(s1_req.offset, s1_req.size, beatBytes, writeBytes) & ~s1_bypass
   // 不需要任何操作，直接给response纠结可以的
   // 这边的opcode似乎不是d的opcode，而是直接把请求的opcode传到这里，再来判断
-  val s1_grant = (s1_req.opcode === AcquireBlock && s1_req.param === BtoT) || s1_req.opcode === AcquirePerm
+  val s1_grant = s1_req.opcode === AcquirePerm
   val s1_uncached_get = s1_req.opcode === Get && s1_req.uncached_get
   // 只有acquire是prio 0
   // Hint是不需要数据吗？
@@ -454,7 +454,10 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   val s3_uncached_get_param = RegEnable(s2_uncached_get_param, s3_latch)
 
   // Lookup table for response codes
-  val grant = Mux(s3_req.param === BtoT, Grant, GrantData)
+  // val grant = Mux(s3_req.param === BtoT, Grant, GrantData)
+  // for BtoT, always returns GrantData
+  // L1DCache depend on this feature
+  val grant = GrantData
   val resp_opcode = Vec(Seq(AccessAck, AccessAck, AccessAckData, AccessAckData, AccessAckData, HintAck, grant, Grant))
 
   // No restrictions on the type of buffer used here

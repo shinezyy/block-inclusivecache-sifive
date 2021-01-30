@@ -18,6 +18,7 @@
 package sifive.blocks.inclusivecache
 
 import Chisel._
+import chisel3.util.Valid
 import freechips.rocketchip.diplomacy.AddressSet
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
@@ -192,6 +193,8 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   if (!params.lastLevel)
     params.ccover(mshr_stall_bc && bc_mshr.io.status.valid, "SCHEDULER_BC_INTERLOCK", "BC MSHR interlocked due to pre-emption")
 
+  val piped_sourceD_ready = RegInit(false.B)
+
   // Consider scheduling an MSHR only if all the resources it requires are available
   // Cat过的都需要reverse一下
   // 这个是说schedule valid，并且没有被stall住，并且所有的发请求的口都ready？
@@ -201,7 +204,7 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
       (sourceA.io.req.ready || !m.io.schedule.bits.a.valid) &&
       (sourceB.io.req.ready || !m.io.schedule.bits.b.valid) &&
       (sourceC.io.req.ready || !m.io.schedule.bits.c.valid) &&
-      (sourceD.io.req.ready || !m.io.schedule.bits.d.valid) &&
+      (piped_sourceD_ready || !m.io.schedule.bits.d.valid) &&
       (sourceE.io.req.ready || !m.io.schedule.bits.e.valid) &&
       (sourceX.io.req.ready || !m.io.schedule.bits.x.valid) &&
       (directory.io.write.ready || !m.io.schedule.bits.dir.valid)
@@ -231,11 +234,35 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   schedule.c.bits.source := Mux(schedule.c.bits.opcode(1), mshr_select, UInt(0)) // only set for Release[Data] not ProbeAck[Data]
   schedule.d.bits.sink   := mshr_select
 
+  def Pipe[T <: Data](gen: Valid[T]): Valid[T] = {
+    when (gen.valid) {
+      DebugPrint(params, "sourceD get piped valid request\n")
+      gen match {
+        case g: Valid[SourceDRequest] => g.bits.dump()
+        case _ =>
+      }
+    }
+    //RegEnable(gen, 0.U.asTypeOf(gen), piped_sourceD_ready)
+    RegNext(gen, 0.U.asTypeOf(gen))
+  }
+
+  when (sourceD.io.req.ready) {
+    when (!piped_sourceD_ready) {
+      DebugPrint(params, "piped_sourceD_ready goto up\n")
+    }
+    piped_sourceD_ready := true.B
+  }
+
+  when (schedule.d.valid && piped_sourceD_ready) {
+    DebugPrint(params, "piped_sourceD_ready goto down\n")
+    piped_sourceD_ready := false.B
+  }
+
   // 这边几个channel的数据一起发送，是不是有点浪费了？
   sourceA.io.req := schedule.a
   sourceB.io.req := schedule.b
   sourceC.io.req := schedule.c
-  sourceD.io.req := schedule.d
+  sourceD.io.req := Pipe(schedule.d)
   sourceE.io.req := schedule.e
   sourceX.io.req := schedule.x
   directory.io.write := schedule.dir

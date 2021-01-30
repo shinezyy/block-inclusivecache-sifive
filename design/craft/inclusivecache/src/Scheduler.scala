@@ -121,7 +121,7 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   // 我感觉这个就是用来放secondary请求的？就是说有请求就从总线上拿下来放这里？
   // 它这儿的queue的数量是3 * mshrs，这个是有啥讲究吗？
   // secondary比mshr要多？
-  val requests = Module(new ListBuffer(ListBufferParameters(new QueuedRequest(params), 3*params.mshrs, params.secondary, false)))
+  val requests = Module(new ListBufferLite(ListBufferParameters(new QueuedRequest(params), 3*params.mshrs, params.secondary, false)))
   val mshrs = Seq.fill(params.mshrs) { Module(new MSHR(params)) }
   // 这是是个啥鬼东西啊？
   // init是得到列表中除了最后一项以外的其他所有项
@@ -416,9 +416,11 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
 
   // Determine which of the queued requests to pop (supposing will_pop)
   val prio_requests = ~(~requests.io.valid | (requests.io.valid >> params.mshrs) | (requests.io.valid >> 2*params.mshrs))
-  val pop_index = OHToUInt(Cat(mshr_selectOH, mshr_selectOH, mshr_selectOH) & prio_requests)
+  val pop_onehot = Cat(mshr_selectOH, mshr_selectOH, mshr_selectOH) & prio_requests
+  val pop_index = OHToUInt(pop_onehot)
   requests.io.pop.valid := will_pop
   requests.io.pop.bits  := pop_index
+  requests.io.pop_onehot_index := pop_onehot
 
   // Reload from the Directory if the next MSHR operation changes tags
   val lb_tag_mismatch = scheduleTag =/= requests.io.data.tag
@@ -452,6 +454,13 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
       OHToUInt(lowerMatches1 << params.mshrs*0),
       OHToUInt(lowerMatches1 << params.mshrs*1),
       OHToUInt(lowerMatches1 << params.mshrs*2)))
+  requests.io.push_onehot_index := Mux1H(
+    request.bits.prio, Seq(
+      lowerMatches1 << params.mshrs*0,
+      lowerMatches1 << params.mshrs*1,
+      lowerMatches1 << params.mshrs*2
+    )
+  )
 
   val mshr_insertOH = ~(leftOR(~mshr_validOH) << 1) & ~mshr_validOH & prioFilter
   (mshr_insertOH.asBools zip mshrs) map { case (s, m) =>

@@ -395,6 +395,14 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   params.ccover(mshr_selectOH.orR && will_reload, "SCHEDULER_RELOAD", "Back-to-back service of two requests")
   params.ccover(mshr_selectOH.orR && will_pop, "SCHEDULER_POP", "Service of a secondary miss")
 
+  val prio_requests = ~(~requests.io.valid | (requests.io.valid >> params.mshrs) | (requests.io.valid >> 2*params.mshrs))
+  val pop_onehot = Cat(mshr_selectOH, mshr_selectOH, mshr_selectOH) & prio_requests
+  // Determine which of the queued requests to pop (supposing will_pop)
+  val pop_index = OHToUInt(pop_onehot)
+  requests.io.pop.valid := will_pop
+  requests.io.pop.bits  := pop_index
+  requests.io.pop_onehot_index := pop_onehot
+
   // 这里其实就是，请求要么是从外面来的，要么是从队列里面选出来的
   // Repeat the above logic, but without the fan-in
   mshrs.zipWithIndex.foreach { case (m, i) =>
@@ -410,23 +418,25 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
     val will_reload = m.io.schedule.bits.reload && (may_pop || bypass)
     m.io.allocate.bits := Mux(bypass, Wire(new QueuedRequest(params), init = request.bits), requests.io.data)
     m.io.allocate.bits.set := m.io.status.bits.set
-    m.io.allocate.bits.repeat := m.io.allocate.bits.tag === m.io.status.bits.tag
+
+    val bypass_repeat = m.io.status.bits.tag === request.bits.tag
+    val schedule_repeat_abc = Seq(0, 1, 2)
+      .map { t => requests.io.dataFanout(params.mshrs * t + i).tag === m.io.status.bits.tag }
+    val select_abc = Seq(0, 1, 2).map { t => pop_onehot(params.mshrs * t + i) }
+    val schedule_repeat = (schedule_repeat_abc & select_abc).orR
+
+    //m.io.allocate.bits.repeat := m.io.allocate.bits.tag === m.io.status.bits.tag
+    m.io.allocate.bits.repeat := Mux(bypass, bypass_repeat, schedule_repeat)
     m.io.allocate.valid := sel && will_reload
   }
 
-  // Determine which of the queued requests to pop (supposing will_pop)
-  val prio_requests = ~(~requests.io.valid | (requests.io.valid >> params.mshrs) | (requests.io.valid >> 2*params.mshrs))
-  val pop_onehot = Cat(mshr_selectOH, mshr_selectOH, mshr_selectOH) & prio_requests
-  val pop_index = OHToUInt(pop_onehot)
-  requests.io.pop.valid := will_pop
-  requests.io.pop.bits  := pop_index
-  requests.io.pop_onehot_index := pop_onehot
-
   // Reload from the Directory if the next MSHR operation changes tags
-  val lb_tag_mismatch = scheduleTag =/= requests.io.data.tag
+  val scheduleMatches = (requests.io.dataFanout.map(_.tag =/= scheduleTag) & pop_onehot.toBools).asUInt.orR
+  val scheduleMatchesReal = Mux(bypass, scheduleTag =/= request.bits.tag, scheduleMatches)
+  val lb_tag_mismatch = scheduleMatches
   val mshr_uses_directory_assuming_no_bypass = schedule.reload && may_pop && lb_tag_mismatch
   val mshr_uses_directory_for_lb = will_pop && lb_tag_mismatch
-  val mshr_uses_directory = will_reload && scheduleTag =/= Mux(bypass, request.bits.tag, requests.io.data.tag)
+  val mshr_uses_directory = will_reload && scheduleMatchesReal
 
   // Is there an MSHR free for this request?
   val mshr_validOH = Cat(mshrs.map(_.io.status.valid).reverse)

@@ -212,10 +212,13 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
 
   // Round-robin arbitration of MSHRs
   // 这边是mshr的请求发出去，但是只能发送一个？why？这么多channel不是应该能并行地发送吗？
+  val CONFIG_ROBIN = false
+
   val robin_filter = RegInit(UInt(0, width = params.mshrs))
-  val robin_request = Cat(mshr_request, mshr_request & robin_filter)
+  val robin_request = if (CONFIG_ROBIN) Cat(mshr_request, mshr_request & robin_filter) else mshr_request
   val mshr_selectOH2 = ~(leftOR(robin_request) << 1) & robin_request
-  val mshr_selectOH = mshr_selectOH2(2*params.mshrs-1, params.mshrs) | mshr_selectOH2(params.mshrs-1, 0)
+  val mshr_selectOH: UInt = if (CONFIG_ROBIN) mshr_selectOH2(2*params.mshrs-1, params.mshrs) | mshr_selectOH2(params.mshrs-1, 0)
+                            else mshr_selectOH2(params.mshrs - 1, 0)  // This bitsect is necessary to remove msb.
   // 这个是这波儿选出的request
   val mshr_select = OHToUInt(mshr_selectOH)
   val schedule = Mux1H(mshr_selectOH, mshrs.map(_.io.schedule.bits))

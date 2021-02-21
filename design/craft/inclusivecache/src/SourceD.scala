@@ -160,8 +160,8 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   io.grant_req.dump()
   */
 
-  when (io.grant_safe) {
-    DebugPrint(params, "SourceD grant_safe\n")
+  when (!io.grant_safe) {
+    DebugPrint(params, "SourceD not grant_safe\n")
   }
 
   // 总线宽度，暂时不知道是对内还是对外
@@ -637,11 +637,6 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   val pre_s3_5_bypass = Mux(pre_s3_5_match, MaskGen(pre_s5_req.offset, pre_s5_req.size, beatBytes, writeBytes), UInt(0))
   val pre_s3_6_bypass = Mux(pre_s3_6_match, MaskGen(pre_s6_req.offset, pre_s6_req.size, beatBytes, writeBytes), UInt(0))
 
-  DebugPrint(params, "SourceD pre_s3_4_match: %b pre_s3_5_match: %b, pre_s3_6_match: %b\n",
-    pre_s3_4_match, pre_s3_5_match, pre_s3_6_match)
-
-  DebugPrint(params, "SourceD pre_s3_4_bypass: %b pre_s3_5_bypass: %b, pre_s3_6_bypass: %b\n",
-    pre_s3_4_bypass, pre_s3_5_bypass, pre_s3_6_bypass)
 
   s3_bypass_data :=
     bypass(RegNext(pre_s3_4_bypass), atomics.io.data_out, RegNext(
@@ -655,9 +650,6 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   val s1_2_match  = s2_req.set === s1_req.set && s2_req.way === s1_req.way && s2_beat === s1_beat && s2_full && s2_retires && !s1_uncached_get && !s2_uncached_get
   val s1_3_match  = s3_req.set === s1_req.set && s3_req.way === s1_req.way && s3_beat === s1_beat && s3_full && s3_retires && !s1_uncached_get && !s3_uncached_get
   val s1_4_match  = s4_req.set === s1_req.set && s4_req.way === s1_req.way && s4_beat === s1_beat && s4_full && !s1_uncached_get && !s4_uncached_get
-
-  DebugPrint(params, "SourceD s1_2_match: %b s1_3_match: %b, s1_4_match: %b\n",
-    s1_2_match, s1_3_match, s1_4_match)
 
   for (i <- 0 until 8) {
     val cover = UInt(i)

@@ -30,8 +30,8 @@ class SourceCRequest(params: InclusiveCacheParameters) extends InclusiveCacheBun
   val way    = UInt(width = params.wayBits)
   val dirty  = Bool()
   def dump() = {
-    DebugPrint(params, "SourceCRequest: opcode: %x param: %x source: %x tag: %x set: %x way: %x dirty: %b\n",
-      opcode, param, source, tag, set, way, dirty)
+    DebugPrint(params, "SourceCRequest: opcode: %x param: %x source: %x tag: %x set: %x way: %x dirty: %b addr %x\n",
+      opcode, param, source, tag, set, way, dirty, (tag << (params.setBits + params.offsetBits) | set << (params.offsetBits)))
   }
 }
 

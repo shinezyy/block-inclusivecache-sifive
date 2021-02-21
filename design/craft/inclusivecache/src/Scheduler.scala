@@ -25,6 +25,14 @@ import freechips.rocketchip.util._
 
 class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
 {
+  def RegInitExpilicit[T <: Data](t: T): T = {
+    val r = Reg(t)
+    when (reset) {
+      r := 0.U.asTypeOf(t)
+    }
+    r
+  }
+
   val io = new Bundle {
     val in = TLBundle(params.inner.bundle).flip
     val out = TLBundle(params.outer.bundle)
@@ -193,90 +201,127 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   if (!params.lastLevel)
     params.ccover(mshr_stall_bc && bc_mshr.io.status.valid, "SCHEDULER_BC_INTERLOCK", "BC MSHR interlocked due to pre-emption")
 
-  val piped_sourceD_ready = RegInit(false.B)
+  /**
+    * schedule_state:
+    *   s_select: under this state, scheduler pick a shedulable mshr, compute its index
+    *   s_schedule: under this state, scheduler make the target modules see the selected mshr's request and shift the mshr.
+    */
+  val s_select = RegInit(true.B)
+  val s_issue = RegInit(false.B)
+
+  def shift_to_select() = {
+    assert(!s_select)
+    assert(s_issue)
+    s_select := true.B
+    s_issue := false.B
+    DebugPrint(params, "shift_to_select\n")
+  }
+
+  def shift_to_issue() = {
+    assert(s_select)
+    assert(!s_issue)
+    s_select := false.B
+    s_issue := true.B
+    DebugPrint(params, "shift_to_issue\n")
+  }
 
   // Consider scheduling an MSHR only if all the resources it requires are available
   // Cat过的都需要reverse一下
   // 这个是说schedule valid，并且没有被stall住，并且所有的发请求的口都ready？
   // 只要是这个的，肯定就是可以发送request的？
-  val mshr_request = Cat((mshrs zip mshr_stall).map { case (m, s) =>
+  val mshr_request_select = Cat((mshrs zip mshr_stall).zipWithIndex.map { case ((m, s), i) =>
+    val sinkc_valid = sinkC.io.resp.valid && sinkC.io.resp.bits.set === m.io.status.bits.set
+    val sinkd_valid = sinkD.io.resp.valid && sinkD.io.resp.bits.source === UInt(i)
+    val sinke_valid = sinkE.io.resp.valid && sinkE.io.resp.bits.sink   === UInt(i)
+
     m.io.schedule.valid && !s &&
       (sourceA.io.req.ready || !m.io.schedule.bits.a.valid) &&
       (sourceB.io.req.ready || !m.io.schedule.bits.b.valid) &&
       (sourceC.io.req.ready || !m.io.schedule.bits.c.valid) &&
-      (piped_sourceD_ready || !m.io.schedule.bits.d.valid) &&
+      (sourceD.io.req.ready || !m.io.schedule.bits.d.valid) &&
       (sourceE.io.req.ready || !m.io.schedule.bits.e.valid) &&
       (sourceX.io.req.ready || !m.io.schedule.bits.x.valid) &&
-      (directory.io.write.ready || !m.io.schedule.bits.dir.valid)
+      (directory.io.write.ready || !m.io.schedule.bits.dir.valid) &&
+      !(sinkc_valid || sinkd_valid || sinke_valid)  // these valid can be active in s_select and change status compared to schedule_issue
   }.reverse)
+
+  val need_to_schedule = mshr_request_select.orR()
+
+  when (s_select && need_to_schedule) {
+    shift_to_issue()
+  }
+  when (s_issue) {
+    shift_to_select()
+  }
+
+  val mshr_request_issue = RegInitExpilicit(mshr_request_select)
+  when (s_select && need_to_schedule) {
+    mshr_request_issue := mshr_request_select
+  }
+  when (s_issue) {
+    mshr_request_issue := 0.U.asTypeOf(mshr_request_issue)
+  }
 
   // Round-robin arbitration of MSHRs
   // 这边是mshr的请求发出去，但是只能发送一个？why？这么多channel不是应该能并行地发送吗？
   val CONFIG_ROBIN = false
 
   val robin_filter = RegInit(UInt(0, width = params.mshrs))
-  val robin_request = if (CONFIG_ROBIN) Cat(mshr_request, mshr_request & robin_filter) else mshr_request
+  val robin_request = if (CONFIG_ROBIN) Cat(mshr_request_select, mshr_request_select & robin_filter) else mshr_request_select
   val mshr_selectOH2 = ~(leftOR(robin_request) << 1) & robin_request
-  val mshr_selectOH: UInt = if (CONFIG_ROBIN) mshr_selectOH2(2*params.mshrs-1, params.mshrs) | mshr_selectOH2(params.mshrs-1, 0)
+  val mshr_selectOH_select: UInt = if (CONFIG_ROBIN) mshr_selectOH2(2*params.mshrs-1, params.mshrs) | mshr_selectOH2(params.mshrs-1, 0)
                             else mshr_selectOH2(params.mshrs - 1, 0)  // This bitsect is necessary to remove msb.
   // 这个是这波儿选出的request
-  val mshr_select = OHToUInt(mshr_selectOH)
-  val schedule = Mux1H(mshr_selectOH, mshrs.map(_.io.schedule.bits))
-  val scheduleTag = Mux1H(mshr_selectOH, mshrs.map(_.io.status.bits.tag))
-  val scheduleSet = Mux1H(mshr_selectOH, mshrs.map(_.io.status.bits.set))
+  val mshr_select = OHToUInt(mshr_selectOH_select)
+
+  val schedule_select = Mux1H(mshr_selectOH_select, mshrs.map(_.io.schedule.bits))
+  val schedule_issue = RegInitExpilicit(schedule_select)
+  val mshr_selectOH_issue = RegInitExpilicit(mshr_selectOH_select)
+
+  when (s_select && need_to_schedule) {
+    schedule_issue := schedule_select
+    mshr_selectOH_issue := mshr_selectOH_select
+  }
+  when (s_issue) {
+    DebugPrint(params, "schedule issue clear\n")
+    schedule_issue := 0.U.asTypeOf(schedule_issue)
+    mshr_selectOH_issue := 0.U.asTypeOf(mshr_selectOH_issue)
+  }
+
+  val scheduleTag_issue = Mux1H(mshr_selectOH_issue, mshrs.map(_.io.status.bits.tag))
+  val scheduleSet_issue = Mux1H(mshr_selectOH_issue, mshrs.map(_.io.status.bits.set))
 
   // When an MSHR wins the schedule, it has lowest priority next time
-  when (mshr_request.orR()) { robin_filter := ~rightOR(mshr_selectOH) }
+  when (s_issue && mshr_request_issue.orR()) { robin_filter := ~rightOR(mshr_selectOH_issue) }
 
   // Fill in which MSHR sends the request
-  schedule.a.bits.source := mshr_select
+  schedule_select.a.bits.source := mshr_select
   // 这个是啥意思？ReleaseData和PorobeAckData有啥差别吗？
   // Release[Data]是6 7， ProbeAck是4 5
   // 所以release时id是选mshr
   // 如果是probeAck，就是零，这是为啥呢？
-  schedule.c.bits.source := Mux(schedule.c.bits.opcode(1), mshr_select, UInt(0)) // only set for Release[Data] not ProbeAck[Data]
-  schedule.d.bits.sink   := mshr_select
+  schedule_select.c.bits.source := Mux(schedule_select.c.bits.opcode(1), mshr_select, UInt(0)) // only set for Release[Data] not ProbeAck[Data]
+  schedule_select.d.bits.sink   := mshr_select
 
-  def Pipe[T <: Data](gen: Valid[T]): Valid[T] = {
-    when (gen.valid) {
-      DebugPrint(params, "sourceD get piped valid request\n")
-      gen match {
-        case g: Valid[SourceDRequest] => g.bits.dump()
-        case _ =>
-      }
-    }
-    //RegEnable(gen, 0.U.asTypeOf(gen), piped_sourceD_ready)
-    RegNext(gen, 0.U.asTypeOf(gen))
+  sourceA.io.req := schedule_issue.a
+  sourceB.io.req := schedule_issue.b
+  sourceC.io.req := schedule_issue.c
+  sourceD.io.req := schedule_issue.d
+  sourceE.io.req := schedule_issue.e
+  sourceX.io.req := schedule_issue.x
+  directory.io.write := schedule_issue.dir
+
+  when (sourceC.io.req.fire()) {
+    DebugPrint(params, "sourceC.fire mshr %d\n", RegNext(mshr_select))
   }
-
-  when (sourceD.io.req.ready) {
-    when (!piped_sourceD_ready) {
-      DebugPrint(params, "piped_sourceD_ready goto up\n")
-    }
-    piped_sourceD_ready := true.B
-  }
-
-  when (schedule.d.valid && piped_sourceD_ready) {
-    DebugPrint(params, "piped_sourceD_ready goto down\n")
-    piped_sourceD_ready := false.B
-  }
-
-  // 这边几个channel的数据一起发送，是不是有点浪费了？
-  sourceA.io.req := schedule.a
-  sourceB.io.req := schedule.b
-  sourceC.io.req := schedule.c
-  sourceD.io.req := Pipe(schedule.d)
-  sourceE.io.req := schedule.e
-  sourceX.io.req := schedule.x
-  directory.io.write := schedule.dir
 
   // nested transaction completion是啥？
   // Forward meta-data changes from nested transaction completion
   // 如果是C或者BC的schedule，那么其他基本模块儿的meta data可能得跟着改改
   // 选中的是不是最后一个通道的C mshr
-  val select_c  = mshr_selectOH(params.mshrs-1)
+  val select_c  = mshr_selectOH_issue(params.mshrs-1)
   // 选中的是不是倒数第二个通道的BC mshr
-  val select_bc = mshr_selectOH(params.mshrs-2)
+  val select_bc = mshr_selectOH_issue(params.mshrs-2)
   nestedwb.set   := Mux(select_c, c_mshr.io.status.bits.set, bc_mshr.io.status.bits.set)
   nestedwb.tag   := Mux(select_c, c_mshr.io.status.bits.tag, bc_mshr.io.status.bits.tag)
   // 这边是要将state改成N或者B
@@ -383,23 +428,23 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   // If this goes to the scheduled MSHR, it may need to be bypassed
   // Alternatively, the MSHR may be refilled from a request queued in the ListBuffer
   // 要和可能选择是从之前的队列里面给pop一项出来
-  val selected_requests = Cat(mshr_selectOH, mshr_selectOH, mshr_selectOH) & requests.io.valid
+  val selected_requests = Cat(mshr_selectOH_issue, mshr_selectOH_issue, mshr_selectOH_issue) & requests.io.valid
   val a_pop = selected_requests((0 + 1) * params.mshrs - 1, 0 * params.mshrs).orR()
   val b_pop = selected_requests((1 + 1) * params.mshrs - 1, 1 * params.mshrs).orR()
   val c_pop = selected_requests((2 + 1) * params.mshrs - 1, 2 * params.mshrs).orR()
-  val bypassMatches = (mshr_selectOH & lowerMatches1).orR() &&
+  val bypassMatches = (mshr_selectOH_issue & lowerMatches1).orR() &&
                       Mux(c_pop || request.bits.prio(2), !c_pop, Mux(b_pop || request.bits.prio(1), !b_pop, !a_pop))
   val may_pop = a_pop || b_pop || c_pop
   val bypass = request.valid && queue && bypassMatches
-  val will_reload = schedule.reload && (may_pop || bypass)
-  val will_pop = schedule.reload && may_pop && !bypass
+  val will_reload = schedule_issue.reload && (may_pop || bypass)
+  val will_pop = schedule_issue.reload && may_pop && !bypass
 
-  params.ccover(mshr_selectOH.orR && bypass, "SCHEDULER_BYPASS", "Bypass new request directly to conflicting MSHR")
-  params.ccover(mshr_selectOH.orR && will_reload, "SCHEDULER_RELOAD", "Back-to-back service of two requests")
-  params.ccover(mshr_selectOH.orR && will_pop, "SCHEDULER_POP", "Service of a secondary miss")
+  params.ccover(mshr_selectOH_issue.orR && bypass, "SCHEDULER_BYPASS", "Bypass new request directly to conflicting MSHR")
+  params.ccover(mshr_selectOH_issue.orR && will_reload, "SCHEDULER_RELOAD", "Back-to-back service of two requests")
+  params.ccover(mshr_selectOH_issue.orR && will_pop, "SCHEDULER_POP", "Service of a secondary miss")
 
   val prio_requests = ~(~requests.io.valid | (requests.io.valid >> params.mshrs) | (requests.io.valid >> 2*params.mshrs))
-  val pop_onehot = Cat(mshr_selectOH, mshr_selectOH, mshr_selectOH) & prio_requests
+  val pop_onehot = Cat(mshr_selectOH_issue, mshr_selectOH_issue, mshr_selectOH_issue) & prio_requests
   // Determine which of the queued requests to pop (supposing will_pop)
   val pop_index = OHToUInt(pop_onehot)
   requests.io.pop.valid := will_pop
@@ -409,7 +454,8 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   // 这里其实就是，请求要么是从外面来的，要么是从队列里面选出来的
   // Repeat the above logic, but without the fan-in
   mshrs.zipWithIndex.foreach { case (m, i) =>
-    val sel = mshr_selectOH(i)
+    val sel = mshr_selectOH_issue(i)
+    assert(!(s_select && sel))
     m.io.schedule.ready := sel
     val a_pop = requests.io.valid(params.mshrs * 0 + i)
     val b_pop = requests.io.valid(params.mshrs * 1 + i)
@@ -422,6 +468,9 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
     m.io.allocate.bits := Mux(bypass, Wire(new QueuedRequest(params), init = request.bits), requests.io.data)
     m.io.allocate.bits.set := m.io.status.bits.set
 
+    when (sel) {
+      assert(schedule_issue.reload === m.io.schedule.bits.reload, "s_issue atomicity broke")
+    }
     val bypass_repeat = m.io.status.bits.tag === request.bits.tag
     val schedule_repeat_abc = Seq(0, 1, 2)
       .map { t => requests.io.dataFanout(params.mshrs * t + i).tag === m.io.status.bits.tag }
@@ -430,14 +479,22 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
 
     //m.io.allocate.bits.repeat := m.io.allocate.bits.tag === m.io.status.bits.tag
     m.io.allocate.bits.repeat := Mux(bypass, bypass_repeat, schedule_repeat)
-    m.io.allocate.valid := sel && will_reload
+    m.io.allocate.valid := sel && will_reload && s_issue
+
+    when (m.io.allocate.valid && bypass) {
+      assert(request.ready)
+    }
+
+    when (sel) {
+      DebugPrint(params, "mshr %d allocate a_pop %b b_pop %b c_pop %b bypassMatches %b bypass %b bypass_repeat %b schedule_repeat %b\n", i.U, a_pop, b_pop, c_pop, bypassMatches, bypass, bypass_repeat, schedule_repeat)
+    }
   }
 
   // Reload from the Directory if the next MSHR operation changes tags
-  val scheduleMatches = (requests.io.dataFanout.map(_.tag =/= scheduleTag) & pop_onehot.toBools).asUInt.orR
-  val scheduleMatchesReal = Mux(bypass, scheduleTag =/= request.bits.tag, scheduleMatches)
+  val scheduleMatches = (requests.io.dataFanout.map(_.tag =/= scheduleTag_issue) & pop_onehot.toBools).asUInt.orR
+  val scheduleMatchesReal = Mux(bypass, scheduleTag_issue =/= request.bits.tag, scheduleMatches)
   val lb_tag_mismatch = scheduleMatches
-  val mshr_uses_directory_assuming_no_bypass = schedule.reload && may_pop && lb_tag_mismatch
+  val mshr_uses_directory_assuming_no_bypass = schedule_issue.reload && may_pop && lb_tag_mismatch
   val mshr_uses_directory_for_lb = will_pop && lb_tag_mismatch
   val mshr_uses_directory = will_reload && scheduleMatchesReal
 
@@ -446,21 +503,35 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   val mshr_free = (~mshr_validOH & prioFilter).orR()
 
   // Fanout the request to the appropriate handler (if any)
-  val bypassQueue = schedule.reload && bypassMatches
+  val bypassQueue = schedule_issue.reload && bypassMatches
   val request_alloc_cases =
      (alloc && !mshr_uses_directory_assuming_no_bypass && mshr_free) ||
      (nestB && !mshr_uses_directory_assuming_no_bypass && !bc_mshr.io.status.valid && !c_mshr.io.status.valid) ||
      (nestC && !mshr_uses_directory_assuming_no_bypass && !c_mshr.io.status.valid)
-  request.ready := request_alloc_cases || (queue && (bypassQueue || requests.io.push.ready))
+
+  val can_bypass_in_issue = schedule_select.reload && bypassMatches
+  request.ready := false.B
+  when (s_select) {
+    request.ready := request_alloc_cases
+  }
+  when (s_issue) {
+    DebugPrint(params, "request_alloc_cases %b queue %b bypassQueue %b\n", request_alloc_cases, queue, bypassQueue)
+    request.ready := request_alloc_cases || (queue && (bypassQueue || requests.io.push.ready))
+  }
+
   val alloc_uses_directory = request.valid && request_alloc_cases
 
   // When a request goes through, it will need to hit the Directory
   directory.io.read.valid := mshr_uses_directory || alloc_uses_directory
-  directory.io.read.bits.set := Mux(mshr_uses_directory_for_lb, scheduleSet,          request.bits.set)
+  directory.io.read.bits.set := Mux(mshr_uses_directory_for_lb, scheduleSet_issue,    request.bits.set)
   directory.io.read.bits.tag := Mux(mshr_uses_directory_for_lb, requests.io.data.tag, request.bits.tag)
 
   // Enqueue the request if not bypassed directly into an MSHR
-  requests.io.push.valid := request.valid && queue && !bypassQueue
+  requests.io.push.valid := request.valid && queue && (s_issue && !bypassQueue)
+  when (requests.io.push.fire()) {
+    assert(request.fire())
+    DebugPrint(params, "requests push for mshr %d prio %b\n", OHToUInt(lowerMatches1), request.bits.prio.asUInt())
+  }
   requests.io.push.bits.data  := request.bits
   requests.io.push.bits.index := Mux1H(
     request.bits.prio, Seq(
@@ -475,12 +546,17 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
     )
   )
 
-  val mshr_insertOH = ~(leftOR(~mshr_validOH) << 1) & ~mshr_validOH & prioFilter
+  val mshr_insertOH: UInt = ~(leftOR(~mshr_validOH) << 1) & ~mshr_validOH & prioFilter
   (mshr_insertOH.asBools zip mshrs) map { case (s, m) =>
     when (request.valid && alloc && s && !mshr_uses_directory_assuming_no_bypass) {
       m.io.allocate.valid := Bool(true)
       m.io.allocate.bits := request.bits
       m.io.allocate.bits.repeat := Bool(false)
+
+      when (m.io.allocate.valid) {
+        assert(request.ready)
+        DebugPrint(params, "MSHR %d: insert req\n", m.io.mshr_id)
+      }
     }
   }
 
@@ -489,6 +565,10 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
     bc_mshr.io.allocate.bits := request.bits
     bc_mshr.io.allocate.bits.repeat := Bool(false)
     assert (!request.bits.prio(0))
+    assert(request.ready)
+    when (bc_mshr.io.allocate.valid) {
+      DebugPrint(params, "MSHR %d: (bc) insert req\n", bc_mshr.io.mshr_id)
+    }
   }
   bc_mshr.io.allocate.bits.prio(0) := Bool(false)
 
@@ -498,13 +578,17 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
     c_mshr.io.allocate.bits.repeat := Bool(false)
     assert (!request.bits.prio(0))
     assert (!request.bits.prio(1))
+    assert(request.ready)
+    when (c_mshr.io.allocate.valid) {
+      DebugPrint(params, "MSHR %d: (c) insert req\n", c_mshr.io.mshr_id)
+    }
   }
   c_mshr.io.allocate.bits.prio(0) := Bool(false)
   c_mshr.io.allocate.bits.prio(1) := Bool(false)
 
   // Fanout the result of the Directory lookup
   val dirTarget = Mux(alloc, mshr_insertOH, Mux(nestB, UInt(1 << (params.mshrs-2)), UInt(1 << (params.mshrs-1))))
-  val directoryFanout = params.dirReg(RegNext(Mux(mshr_uses_directory, mshr_selectOH, Mux(alloc_uses_directory, dirTarget, UInt(0)))))
+  val directoryFanout = params.dirReg(RegNext(Mux(mshr_uses_directory, mshr_selectOH_issue, Mux(alloc_uses_directory, dirTarget, UInt(0)))))
   mshrs.zipWithIndex.foreach { case (m, i) =>
     m.io.directory.valid := directoryFanout(i)
     m.io.directory.bits := directory.io.result.bits

@@ -28,8 +28,8 @@ class SourceBRequest(params: InclusiveCacheParameters) extends InclusiveCacheBun
   val set     = UInt(width = params.setBits)
   val clients = UInt(width = params.clientBits)
   def dump() = {
-    DebugPrint(params, "SourceBRequest: param: %x tag: %x set: %x clients: %x\n",
-      param, tag, set, clients)
+    DebugPrint(params, "SourceBRequest: param: %x tag: %x set: %x clients: %x addr %x\n",
+      param, tag, set, clients, (tag << (params.setBits + params.offsetBits) | set << (params.offsetBits)))
   }
 }
 

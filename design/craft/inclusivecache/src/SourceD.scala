@@ -50,18 +50,32 @@ class AtomicsLocal(params: TLBundleParameters) extends Module
   val pick_a = take_max === a_bigger
 
   // Logical, what to do
-  val lut = Vec(Seq(
+  val lut = MuxLookup(io.a.param(1, 0), 0x6.U, List(
+    0.U -> 0x6.U,
+    1.U -> 0xe.U,
+    2.U -> 0x8.U,
+    3.U -> 0xc.U
+  ))
+  val lutx = Vec(Seq(
     UInt(0x6),   // XOR
     UInt(0xe),   // OR
     UInt(0x8),   // AND
     UInt(0xc)))( // SWAP
     io.a.param(1,0))
+  assert(lutx === lut)
+
   val logical = Cat((io.a.data.asBools zip io.data_in.asBools).map { case (a, d) =>
     lut(Cat(a, d))
   }.reverse)
 
   // Operation, what to do? (0=d, 1=a, 2=sum, 3=logical)
-  val select = Mux(io.write, UInt(1), Vec(Seq(
+  val op = MuxLookup(io.a.opcode, 0.U, List(
+    0.U -> 1.U,
+    1.U -> 1.U,
+    2.U -> Mux(adder, UInt(2), Mux(pick_a, UInt(1), UInt(0))), // ArithmeticData
+    3.U -> 3.U
+  ))
+  val opx = Vec(Seq(
     UInt(1),   // PutFullData
     UInt(1),   // PutPartialData
     Mux(adder, UInt(2), Mux(pick_a, UInt(1), UInt(0))), // ArithmeticData
@@ -70,12 +84,16 @@ class AtomicsLocal(params: TLBundleParameters) extends Module
     UInt(0),   // Hint
     UInt(0),   // AcquireBlock
     UInt(0)))( // AcquirePerm
-    io.a.opcode))
+    io.a.opcode)
+  assert(op === opx)
+  val select = Mux(io.write, UInt(1), op)
 
   // Only the masked bytes can be modified
+  println(s"atomics io.a.mask size ${io.a.mask.asBools().length}")
   val selects = io.a.mask.asBools.map(b => Mux(b, select, UInt(0)))
   io.data_out := Cat(selects.zipWithIndex.map { case (s, i) =>
-    Vec(Seq(io.data_in, io.a.data, sum, logical).map(_((i + 1) * 8 - 1, i * 8)))(s)
+    val list = Seq(io.data_in, io.a.data, sum, logical).map(_((i + 1) * 8 - 1, i * 8))
+    MuxLookup(s, 0.U, list.zipWithIndex.map { case (u, idx) => idx.U -> u })
   }.reverse)
 }
 

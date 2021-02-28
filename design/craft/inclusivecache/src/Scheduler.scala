@@ -148,8 +148,8 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   io.prefetcher.acquire.bits  := prefetcherAcquire_arb.io.out.bits
   prefetcherAcquire_arb.io.out.ready := true.B
   mshrs.zipWithIndex.foreach { case (m, i) =>
-    prefetcherAcquire_arb.io.in(i).valid := m.io.prefetcherAcquire.valid
-    prefetcherAcquire_arb.io.in(i).bits  := m.io.prefetcherAcquire.bits
+    prefetcherAcquire_arb.io.in(i).valid := RegNext(m.io.prefetcherAcquire.valid)
+    prefetcherAcquire_arb.io.in(i).bits  := RegNext(m.io.prefetcherAcquire.bits)
   }
 
   val validVec = Vec(mshrs map { case m => m.io.prefetcherAcquire.valid })
@@ -383,7 +383,10 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   // priority inversion到底是个什么问题？
   // 这尼玛写错了吧？中间的为啥是零，不是应该是bc吗？
   // 低位的全部是1
-  val prioFilter = Cat(request.bits.prio(2), !request.bits.prio(0), ~UInt(0, width = params.mshrs-2))
+  val prioFilterx = Cat(request.bits.prio(2), !request.bits.prio(0), ~UInt(0, width = params.mshrs-2))
+  val prioFilter  = Cat(sinkC.io.req.valid, sinkB.io.req.valid || sinkC.io.req.valid, ~UInt(0, width = params.mshrs-2))
+  assert(!request.valid || (prioFilter === prioFilterx), "prio %b, %b should be correspond to sink valids", prioFilter, prioFilterx)
+
   val lowerMatches = setMatches & prioFilter
   // 如果这个request暂时没法处理，那就放进buffer
   // 这边是确定要不要queue？
@@ -443,8 +446,15 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   params.ccover(mshr_selectOH_issue.orR && will_reload, "SCHEDULER_RELOAD", "Back-to-back service of two requests")
   params.ccover(mshr_selectOH_issue.orR && will_pop, "SCHEDULER_POP", "Service of a secondary miss")
 
-  val prio_requests = ~(~requests.io.valid | (requests.io.valid >> params.mshrs) | (requests.io.valid >> 2*params.mshrs))
-  val pop_onehot = Cat(mshr_selectOH_issue, mshr_selectOH_issue, mshr_selectOH_issue) & prio_requests
+  val prio_requests_select: UInt = ~(~requests.io.valid | (requests.io.valid >> params.mshrs) | (requests.io.valid >> 2*params.mshrs))
+  val prio_requests_issue: UInt = RegInitExpilicit(prio_requests_select)
+  when (s_select & need_to_schedule) {
+    prio_requests_issue := prio_requests_select
+  }
+  when (s_issue) {
+    prio_requests_issue := 0.U.asTypeOf(prio_requests_select)
+  }
+  val pop_onehot = Cat(mshr_selectOH_issue, mshr_selectOH_issue, mshr_selectOH_issue) & prio_requests_issue
   // Determine which of the queued requests to pop (supposing will_pop)
   val pop_index = OHToUInt(pop_onehot)
   requests.io.pop.valid := will_pop

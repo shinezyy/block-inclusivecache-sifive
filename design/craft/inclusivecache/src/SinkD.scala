@@ -228,9 +228,25 @@ class SinkD(params: InclusiveCacheParameters) extends Module with HasTLDump
   val grant = Mux(first, freeIdx, RegEnable(freeIdx, first))
 
   // 常见写法，valid时直接用，不valid时，用锁存的值
+  val prev_source = RegNext(io.source)
+  val source_changed = prev_source =/= io.source
+  val init_d = RegInit(true.B)
+  val way_set_valid = RegInit(false.B)
+  when (d.valid && !init_d) {
+    init_d := false.B
+  }
+  when (d.valid && (init_d || source_changed)) {
+    way_set_valid := true.B
+    DebugPrint(params, "wait way set pair next cycle\n")
+  }
+  when (d.fire() && last) {
+    way_set_valid := false.B
+    DebugPrint(params, "way_set_valid reset\n")
+  }
+  val grant_safe = way_set_valid && io.grant_safe
   io.source := Mux(d.valid, d.bits.source, RegEnable(d.bits.source, d.valid))
-  io.grant_req.way := io.way
-  io.grant_req.set := io.set
+  io.grant_req.way := RegNext(io.way)
+  io.grant_req.set := RegNext(io.set)
 
   val uncache = d.bits.opcode === AccessAckData
   val cache = !uncache
@@ -241,7 +257,7 @@ class SinkD(params: InclusiveCacheParameters) extends Module with HasTLDump
   //   If it belongs to an uncache has Data AND is the first beat, it must claim a list
 
   // need to block D response when grant is not safe
-  val resp_block = first && !io.grant_safe
+  val resp_block = first && !grant_safe
   // buf block则是要保存数据，这个只要有数据，就得保存
   val buf_block = hasData && !grantbuffer.io.push.ready
   // set block是建立保存的list，这个只有对于第一拍需要建立list
@@ -276,8 +292,8 @@ class SinkD(params: InclusiveCacheParameters) extends Module with HasTLDump
   // 总感觉这边有点问题啊？
   // 为啥不是first就要valid呢？
   // 当不是first时，要和不看d是否valid吗？就直接写吗？这也不太对吧？我感觉这个是假设了message都是连续拍的吧？这个不一定能保证的吧？
-  io.bs_adr.valid := cache && (!first || (d.valid && io.grant_safe))
-  params.ccover(d.valid && first && !io.grant_safe, "SINKD_HAZARD", "Prevented Grant data hazard with backpressure")
+  io.bs_adr.valid := cache && (!first || (d.valid && grant_safe))
+  params.ccover(d.valid && first && !grant_safe, "SINKD_HAZARD", "Prevented Grant data hazard with backpressure")
   params.ccover(io.bs_adr.valid && !io.bs_adr.ready, "SINKD_SRAM_STALL", "Data SRAM busy")
 
   // 这是啥意思？

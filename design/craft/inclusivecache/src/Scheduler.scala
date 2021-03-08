@@ -34,6 +34,7 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
     val req = Decoupled(new SinkXRequest(params)).flip
     val resp = Decoupled(new SourceXRequest(params))
     val prefetcher = new PrefetcherIO(params.inner.bundle.addressBits)
+    val n_active_mshrs = Output(UInt(log2Ceil(params.mshrs + 1)))
   }
 
   val sourceA = Module(new SourceA(params))
@@ -495,6 +496,8 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   sourceD.io.grant_req := sinkD  .io.grant_req
   sourceC.io.evict_safe := sourceD.io.evict_safe
   sinkD  .io.grant_safe := sourceD.io.grant_safe
+
+  io.n_active_mshrs := PopCount(mshrs.map(_.io.status.valid))
 
   private def afmt(x: AddressSet) = s"""{"base":${x.base},"mask":${x.mask}}"""
   private def addresses = params.inner.manager.managers.flatMap(_.address).map(afmt _).mkString(",")

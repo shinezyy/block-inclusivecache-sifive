@@ -224,6 +224,9 @@ class InclusiveCache(
       scheduler
     }
 
+    val n_active_mshrs = IO(Output(mods(0).io.n_active_mshrs.cloneType))
+    n_active_mshrs := mods(0).io.n_active_mshrs
+
     // for now, we have only one prefetcher feedback port
     // and now, to simplify implementation
     // we do not want prefetcher feedback port to back pressure L2

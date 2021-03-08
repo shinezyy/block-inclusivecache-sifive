@@ -225,7 +225,11 @@ class InclusiveCache(
     }
 
     val n_active_mshrs = IO(Output(mods(0).io.n_active_mshrs.cloneType))
+    val c_has_active_mshrs = IO(mods(0).io.c_has_active_mshrs.cloneType)
+    val max_active_mshrs = IO(mods(0).io.max_active_mshrs.cloneType)
     n_active_mshrs := mods(0).io.n_active_mshrs
+    c_has_active_mshrs := mods(0).io.c_has_active_mshrs
+    max_active_mshrs := mods(0).io.max_active_mshrs
 
     // for now, we have only one prefetcher feedback port
     // and now, to simplify implementation

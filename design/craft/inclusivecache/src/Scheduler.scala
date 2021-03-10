@@ -18,21 +18,70 @@
 package sifive.blocks.inclusivecache
 
 import Chisel._
-import chisel3.util.Valid
 import freechips.rocketchip.diplomacy.AddressSet
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 
-class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
-{
-  def RegInitExpilicit[T <: Data](t: T): T = {
+class ScheduleCut(params: InclusiveCacheParameters) extends Module {
+  class ScheduleInfo extends Bundle {
+    val schedule = new ScheduleRequest(params)
+    val mshrStatus = new MSHRStatus(params)
+    val mshrReqValids = UInt(params.mshrs.W)
+    val mshrSelectOH = UInt(params.mshrs.W)
+    val prioRequests = UInt((params.mshrs * 3).W)
+  }
+
+  val io = IO(new Bundle {
+    val need_to_schedule = Input(Bool())
+    val select = Input(new ScheduleInfo)
+    val issue = Output(new ScheduleInfo)
+    val s_select = Output(Bool())
+    val s_issue = Output(Bool())
+  })
+
+  /**
+    * schedule_state:
+    *   s_select: under this state, scheduler pick a shedulable mshr, compute its index
+    *   s_schedule: under this state, scheduler make the target modules see the selected mshr's request and shift the mshr.
+    */
+  val s_select = RegInit(true.B)
+  val s_issue = RegInit(false.B)
+
+  def IssueReg[T <: Data](t: T): T = {
     val r = Reg(t)
-    when (reset) {
+    when (reset || s_issue) {
       r := 0.U.asTypeOf(t)
+    }
+    when (s_select && io.need_to_schedule) {
+      r := t
     }
     r
   }
 
+  io.issue := IssueReg(io.select)
+
+  when (s_select && io.need_to_schedule) {
+    assert(s_select)
+    assert(!s_issue)
+    s_select := false.B
+    s_issue := true.B
+    DebugPrint(params, "shift_to_issue\n")
+  }
+
+  when (s_issue) {
+    assert(!s_select)
+    assert(s_issue)
+    s_select := true.B
+    s_issue := false.B
+    DebugPrint(params, "shift_to_select\n")
+  }
+
+  io.s_select := s_select
+  io.s_issue := s_issue
+}
+
+class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
+{
   val io = new Bundle {
     val in = TLBundle(params.inner.bundle).flip
     val out = TLBundle(params.outer.bundle)
@@ -201,30 +250,6 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   if (!params.lastLevel)
     params.ccover(mshr_stall_bc && bc_mshr.io.status.valid, "SCHEDULER_BC_INTERLOCK", "BC MSHR interlocked due to pre-emption")
 
-  /**
-    * schedule_state:
-    *   s_select: under this state, scheduler pick a shedulable mshr, compute its index
-    *   s_schedule: under this state, scheduler make the target modules see the selected mshr's request and shift the mshr.
-    */
-  val s_select = RegInit(true.B)
-  val s_issue = RegInit(false.B)
-
-  def shift_to_select() = {
-    assert(!s_select)
-    assert(s_issue)
-    s_select := true.B
-    s_issue := false.B
-    DebugPrint(params, "shift_to_select\n")
-  }
-
-  def shift_to_issue() = {
-    assert(s_select)
-    assert(!s_issue)
-    s_select := false.B
-    s_issue := true.B
-    DebugPrint(params, "shift_to_issue\n")
-  }
-
   // Consider scheduling an MSHR only if all the resources it requires are available
   // Cat过的都需要reverse一下
   // 这个是说schedule valid，并且没有被stall住，并且所有的发请求的口都ready？
@@ -245,54 +270,35 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
       !(sinkc_valid || sinkd_valid || sinke_valid)  // these valid can be active in s_select and change status compared to schedule_issue
   }.reverse)
 
-  val need_to_schedule = mshr_request_select.orR()
-
-  when (s_select && need_to_schedule) {
-    shift_to_issue()
-  }
-  when (s_issue) {
-    shift_to_select()
-  }
-
-  val mshr_request_issue = RegInitExpilicit(mshr_request_select)
-  when (s_select && need_to_schedule) {
-    mshr_request_issue := mshr_request_select
-  }
-  when (s_issue) {
-    mshr_request_issue := 0.U.asTypeOf(mshr_request_issue)
-  }
-
   // Round-robin arbitration of MSHRs
   // 这边是mshr的请求发出去，但是只能发送一个？why？这么多channel不是应该能并行地发送吗？
   val CONFIG_ROBIN = false
 
   val robin_filter = RegInit(UInt(0, width = params.mshrs))
   val robin_request = if (CONFIG_ROBIN) Cat(mshr_request_select, mshr_request_select & robin_filter) else mshr_request_select
-  val mshr_selectOH2 = ~(leftOR(robin_request) << 1) & robin_request
+  val mshr_selectOH2 = (~(leftOR(robin_request) << 1)).asUInt & robin_request
   val mshr_selectOH_select: UInt = if (CONFIG_ROBIN) mshr_selectOH2(2*params.mshrs-1, params.mshrs) | mshr_selectOH2(params.mshrs-1, 0)
                             else mshr_selectOH2(params.mshrs - 1, 0)  // This bitsect is necessary to remove msb.
   // 这个是这波儿选出的request
   val mshr_select = OHToUInt(mshr_selectOH_select)
 
   val schedule_select = Mux1H(mshr_selectOH_select, mshrs.map(_.io.schedule.bits))
-  val schedule_issue = RegInitExpilicit(schedule_select)
-  val mshr_selectOH_issue = RegInitExpilicit(mshr_selectOH_select)
+  val scheduleStatus_select = Mux1H(mshr_selectOH_select, mshrs.map(_.io.status.bits))
 
-  when (s_select && need_to_schedule) {
-    schedule_issue := schedule_select
-    mshr_selectOH_issue := mshr_selectOH_select
-  }
-  when (s_issue) {
-    DebugPrint(params, "schedule issue clear\n")
-    schedule_issue := 0.U.asTypeOf(schedule_issue)
-    mshr_selectOH_issue := 0.U.asTypeOf(mshr_selectOH_issue)
-  }
+  val cut = Module(new ScheduleCut(params))
+  val s_select = cut.io.s_select
+  val s_issue = cut.io.s_issue
+  cut.io.need_to_schedule := mshr_request_select.orR()
+  cut.io.select.mshrReqValids := mshr_request_select
+  cut.io.select.mshrStatus := scheduleStatus_select
+  cut.io.select.mshrSelectOH := mshr_selectOH_select
+  cut.io.select.schedule := schedule_select
 
-  val scheduleTag_issue = Mux1H(mshr_selectOH_issue, mshrs.map(_.io.status.bits.tag))
-  val scheduleSet_issue = Mux1H(mshr_selectOH_issue, mshrs.map(_.io.status.bits.set))
 
   // When an MSHR wins the schedule, it has lowest priority next time
-  when (s_issue && mshr_request_issue.orR()) { robin_filter := ~rightOR(mshr_selectOH_issue) }
+  when (s_issue && cut.io.issue.mshrReqValids.orR()) {
+    robin_filter := ~rightOR(cut.io.issue.mshrSelectOH)
+  }
 
   // Fill in which MSHR sends the request
   schedule_select.a.bits.source := mshr_select
@@ -303,6 +309,7 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   schedule_select.c.bits.source := Mux(schedule_select.c.bits.opcode(1), mshr_select, UInt(0)) // only set for Release[Data] not ProbeAck[Data]
   schedule_select.d.bits.sink   := mshr_select
 
+  val schedule_issue = cut.io.issue.schedule
   sourceA.io.req := schedule_issue.a
   sourceB.io.req := schedule_issue.b
   sourceC.io.req := schedule_issue.c
@@ -319,9 +326,9 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   // Forward meta-data changes from nested transaction completion
   // 如果是C或者BC的schedule，那么其他基本模块儿的meta data可能得跟着改改
   // 选中的是不是最后一个通道的C mshr
-  val select_c  = mshr_selectOH_issue(params.mshrs-1)
+  val select_c  = cut.io.issue.mshrSelectOH(params.mshrs-1)
   // 选中的是不是倒数第二个通道的BC mshr
-  val select_bc = mshr_selectOH_issue(params.mshrs-2)
+  val select_bc = cut.io.issue.mshrSelectOH(params.mshrs-2)
   nestedwb.set   := Mux(select_c, c_mshr.io.status.bits.set, bc_mshr.io.status.bits.set)
   nestedwb.tag   := Mux(select_c, c_mshr.io.status.bits.tag, bc_mshr.io.status.bits.tag)
   // 这边是要将state改成N或者B
@@ -431,6 +438,7 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   // If this goes to the scheduled MSHR, it may need to be bypassed
   // Alternatively, the MSHR may be refilled from a request queued in the ListBuffer
   // 要和可能选择是从之前的队列里面给pop一项出来
+  val mshr_selectOH_issue = cut.io.issue.mshrSelectOH
   val selected_requests = Cat(mshr_selectOH_issue, mshr_selectOH_issue, mshr_selectOH_issue) & requests.io.valid
   val a_pop = selected_requests((0 + 1) * params.mshrs - 1, 0 * params.mshrs).orR()
   val b_pop = selected_requests((1 + 1) * params.mshrs - 1, 1 * params.mshrs).orR()
@@ -446,14 +454,8 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   params.ccover(mshr_selectOH_issue.orR && will_reload, "SCHEDULER_RELOAD", "Back-to-back service of two requests")
   params.ccover(mshr_selectOH_issue.orR && will_pop, "SCHEDULER_POP", "Service of a secondary miss")
 
-  val prio_requests_select: UInt = ~(~requests.io.valid | (requests.io.valid >> params.mshrs) | (requests.io.valid >> 2*params.mshrs))
-  val prio_requests_issue: UInt = RegInitExpilicit(prio_requests_select)
-  when (s_select & need_to_schedule) {
-    prio_requests_issue := prio_requests_select
-  }
-  when (s_issue) {
-    prio_requests_issue := 0.U.asTypeOf(prio_requests_select)
-  }
+  cut.io.select.prioRequests := ~((~requests.io.valid).asUInt | (requests.io.valid >> params.mshrs).asUInt | (requests.io.valid >> 2*params.mshrs).asUInt)
+  val prio_requests_issue = cut.io.issue.prioRequests
   val pop_onehot = Cat(mshr_selectOH_issue, mshr_selectOH_issue, mshr_selectOH_issue) & prio_requests_issue
   // Determine which of the queued requests to pop (supposing will_pop)
   val pop_index = OHToUInt(pop_onehot)
@@ -501,7 +503,9 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   }
 
   // Reload from the Directory if the next MSHR operation changes tags
-  val scheduleMatches = (requests.io.dataFanout.map(_.tag =/= scheduleTag_issue) & pop_onehot.toBools).asUInt.orR
+  val scheduleTag_issue = cut.io.issue.mshrStatus.tag
+  val scheduleSet_issue = cut.io.issue.mshrStatus.set
+  val scheduleMatches = (requests.io.dataFanout.map(_.tag =/= scheduleTag_issue) & pop_onehot.toBools).orR
   val scheduleMatchesReal = Mux(bypass, scheduleTag_issue =/= request.bits.tag, scheduleMatches)
   val lb_tag_mismatch = scheduleMatches
   val mshr_uses_directory_assuming_no_bypass = schedule_issue.reload && may_pop && lb_tag_mismatch
@@ -510,7 +514,7 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
 
   // Is there an MSHR free for this request?
   val mshr_validOH = Cat(mshrs.map(_.io.status.valid).reverse)
-  val mshr_free = (~mshr_validOH & prioFilter).orR()
+  val mshr_free = ((~mshr_validOH).asUInt & prioFilter).orR()
 
   // Fanout the request to the appropriate handler (if any)
   val bypassQueue = schedule_issue.reload && bypassMatches

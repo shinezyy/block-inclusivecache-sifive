@@ -603,10 +603,10 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
 
   // Fanout the result of the Directory lookup
   val dirTarget = Mux(alloc, mshr_insertOH, Mux(nestB, UInt(1 << (params.mshrs-2)), UInt(1 << (params.mshrs-1))))
-  val directoryFanout = params.dirReg(RegNext(Mux(mshr_uses_directory, mshr_selectOH_issue, Mux(alloc_uses_directory, dirTarget, UInt(0)))))
+  val directoryFanout = params.dirReg(RegNext(RegNext(Mux(mshr_uses_directory, mshr_selectOH_issue, Mux(alloc_uses_directory, dirTarget, UInt(0))))))
   mshrs.zipWithIndex.foreach { case (m, i) =>
     m.io.directory.valid := directoryFanout(i)
-    m.io.directory.bits := directory.io.result.bits
+    m.io.directory.bits := RegNext(directory.io.result.bits)
   }
 
   // MSHR response meta-data fetch

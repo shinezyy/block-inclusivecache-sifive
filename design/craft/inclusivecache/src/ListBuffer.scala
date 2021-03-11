@@ -142,7 +142,9 @@ class ListBufferLite[T <: Data](params: ListBufferParameters[T]) extends Module
   val valid_clr = Wire(init = UInt(0, width=params.queues))
 
   // 看是否还有空的entry
-  io.push.ready := ~valid(io.push.bits.index)
+  val push_ready_origin: UInt = ~valid(io.push.bits.index)
+  io.push.ready := ~((valid & io.push_onehot_index).orR)
+  assert(!io.push.valid || push_ready_origin === io.push.ready, "push valid %b index %x onehot %b valids %b orig %b", io.push.valid, io.push.bits.index, io.push_onehot_index, valid, push_ready_origin)
   when (io.push.fire()) {
     // 进入哪个queue
     valid_set := UIntToOH(io.push.bits.index, params.queues)

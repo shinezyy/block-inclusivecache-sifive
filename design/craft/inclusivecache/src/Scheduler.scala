@@ -22,6 +22,24 @@ import freechips.rocketchip.diplomacy.AddressSet
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 
+class TrackWire[T <: Data](gen: T) extends Module {
+  val io = IO(new Bundle {
+    val in = Input(gen)
+    val out = Output(gen)
+  })
+
+  io.out := io.in
+}
+
+object TrackWire {
+  def apply[T <: Data](in: T): T = {
+    val trackWire = Module(new TrackWire(in))
+    trackWire.io.in := in
+    trackWire.io.out
+  }
+}
+
+
 class ScheduleCut(params: InclusiveCacheParameters) extends Module {
   class ScheduleInfo extends Bundle {
     val schedule = new ScheduleRequest(params)
@@ -217,7 +235,7 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   // 然后sinkD和E是是直接拿i做的
   mshrs.zipWithIndex.foreach { case (m, i) =>
     m.io.sinkc.valid := sinkC.io.resp.valid && sinkC.io.resp.bits.set === m.io.status.bits.set
-    m.io.sinkd.valid := sinkD.io.resp.valid && sinkD.io.resp.bits.source === UInt(i)
+    m.io.sinkd.valid := TrackWire(sinkD.io.resp.valid && sinkD.io.resp.bits.source === UInt(i))
     m.io.sinke.valid := sinkE.io.resp.valid && sinkE.io.resp.bits.sink   === UInt(i)
     m.io.sinkc.bits := sinkC.io.resp.bits
     m.io.sinkd.bits := sinkD.io.resp.bits
@@ -267,7 +285,7 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
       (sourceE.io.req.ready || !m.io.schedule.bits.e.valid) &&
       (sourceX.io.req.ready || !m.io.schedule.bits.x.valid) &&
       (directory.io.write.ready || !m.io.schedule.bits.dir.valid) &&
-      !(sinkc_valid || sinkd_valid || sinke_valid)  // these valid can be active in s_select and change status compared to schedule_issue
+      TrackWire(!(sinkc_valid || sinkd_valid || sinke_valid))  // these valid can be active in s_select and change status compared to schedule_issue
   }.reverse)
 
   // Round-robin arbitration of MSHRs
@@ -276,7 +294,7 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
 
   val robin_filter = RegInit(UInt(0, width = params.mshrs))
   val robin_request = if (CONFIG_ROBIN) Cat(mshr_request_select, mshr_request_select & robin_filter) else mshr_request_select
-  val mshr_selectOH2 = (~(leftOR(robin_request) << 1)).asUInt & robin_request
+  val mshr_selectOH2 = TrackWire((~(leftOR(robin_request) << 1)).asUInt & robin_request)
   val mshr_selectOH_select: UInt = if (CONFIG_ROBIN) mshr_selectOH2(2*params.mshrs-1, params.mshrs) | mshr_selectOH2(params.mshrs-1, 0)
                             else mshr_selectOH2(params.mshrs - 1, 0)  // This bitsect is necessary to remove msb.
   // 这个是这波儿选出的request
@@ -288,11 +306,11 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   val cut = Module(new ScheduleCut(params))
   val s_select = cut.io.s_select
   val s_issue = cut.io.s_issue
-  cut.io.need_to_schedule := mshr_request_select.orR()
-  cut.io.select.mshrReqValids := mshr_request_select
+  cut.io.need_to_schedule := TrackWire(mshr_request_select.orR())
+  cut.io.select.mshrReqValids := TrackWire(mshr_request_select)
   cut.io.select.mshrStatus := scheduleStatus_select
-  cut.io.select.mshrSelectOH := mshr_selectOH_select
-  cut.io.select.schedule := schedule_select
+  cut.io.select.mshrSelectOH := TrackWire(mshr_selectOH_select)
+  cut.io.select.schedule := TrackWire(schedule_select)
 
 
   // When an MSHR wins the schedule, it has lowest priority next time
@@ -358,7 +376,8 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   sinkA.io.req.ready := directory.io.ready && request.ready && !sinkC.io.req.valid && !sinkB.io.req.valid && !sinkX.io.req.valid
 
   // If no MSHR has been assigned to this set, we need to allocate one
-  val setMatches = Cat(mshrs.map { m => m.io.status.valid && m.io.status.bits.set === request.bits.set }.reverse)
+  val request_set = TrackWire(request.bits.set)
+  val setMatches = Cat(mshrs.map { m => m.io.status.valid && m.io.status.bits.set === request_set }.reverse)
   // 没有set match的
   val alloc = !setMatches.orR() // NOTE: no matches also means no BC or C pre-emption on this set
   // If a same-set MSHR says that requests of this type must be blocked (for bounded time), do it
@@ -550,9 +569,9 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   requests.io.push.bits.data  := request.bits
   requests.io.push.bits.index := Mux1H(
     request.bits.prio, Seq(
-      OHToUInt(lowerMatches1 << params.mshrs*0),
-      OHToUInt(lowerMatches1 << params.mshrs*1),
-      OHToUInt(lowerMatches1 << params.mshrs*2)))
+      OHToUInt(TrackWire(lowerMatches1) << params.mshrs*0),
+      OHToUInt(TrackWire(lowerMatches1) << params.mshrs*1),
+      OHToUInt(TrackWire(lowerMatches1) << params.mshrs*2)))
   requests.io.push_onehot_index := Mux1H(
     request.bits.prio, Seq(
       lowerMatches1 << params.mshrs*0,
@@ -561,9 +580,9 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
     )
   )
 
-  val mshr_insertOH: UInt = ~(leftOR(~mshr_validOH) << 1) & ~mshr_validOH & prioFilter
+  val mshr_insertOH: UInt = TrackWire(~(leftOR(~mshr_validOH) << 1) & ~mshr_validOH & prioFilter)
   (mshr_insertOH.asBools zip mshrs) map { case (s, m) =>
-    when (request.valid && alloc && s && !mshr_uses_directory_assuming_no_bypass) {
+    when (TrackWire(request.valid) && TrackWire(alloc) && s && TrackWire(!mshr_uses_directory_assuming_no_bypass)) {
       m.io.allocate.valid := Bool(true)
       m.io.allocate.bits := request.bits
       m.io.allocate.bits.repeat := Bool(false)

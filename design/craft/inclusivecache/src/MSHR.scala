@@ -998,7 +998,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
       outer_probe_shrink_permission := isShrink
 
       // Do we need to actually do something?
-      when (isShrink) {
+      when (TrackWire(isShrink)) {
         s_writeback := Bool(false)
         // 当当前的块儿是trunk时，肯定得有client是tip
         assert(new_meta.state =/= TRUNK || new_meta.clients =/= UInt(0))
@@ -1007,7 +1007,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
         // 我们只需要把自己的tip给丢掉就可以了
         val tip_with_branch_toB = new_meta.state === TIP && new_meta.clients =/= UInt(0) && probe_toB
         // Do we need to shoot-down inner caches?
-        when (Bool(!params.firstLevel) && (new_meta.clients =/= UInt(0)) && !tip_with_branch_toB) {
+        when (Bool(!params.firstLevel) && TrackWire((new_meta.clients =/= UInt(0))) && TrackWire(!tip_with_branch_toB)) {
           s_pprobe := Bool(false)
           w_pprobeackfirst := Bool(false)
           w_pprobeacklast := Bool(false)
@@ -1075,9 +1075,9 @@ class MSHR(params: InclusiveCacheParameters) extends Module
       // 如果我们需要tip权限，并且client有拿着块儿的
       // 或者我们是trunk权限，我们现在根本就不是最新的块儿，根本就无法处理，也要把内部再probe一下
       // 我们要把这个块儿给probe
-      when (Bool(!params.firstLevel) && (new_meta.hit &&
-            (new_needT || new_meta.state === TRUNK) &&
-            (new_meta.clients & ~new_skipProbe) =/= UInt(0))) {
+      when (Bool(!params.firstLevel) && (TrackWire(new_meta.hit) &&
+            TrackWire((new_needT || new_meta.state === TRUNK)) &&
+            TrackWire((new_meta.clients & ~new_skipProbe) =/= UInt(0)))) {
               // s_pprobe和s_pprobe是干啥的呢？
         s_pprobe := Bool(false)
         w_pprobeackfirst := Bool(false)

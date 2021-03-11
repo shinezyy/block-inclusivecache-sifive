@@ -616,7 +616,7 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   io.bs_wdat.data := atomics.io.data_out
   assert (!(s4_full && s4_need_pb && s4_pdata.corrupt), "Data poisoning unsupported")
 
-  params.ccover(io.bs_wadr.valid && !io.bs_wadr.ready, "SOURCED_4_WRITEBACK_STALL", "Data writeback stalled")
+  params.ccover(io.bs_wadr.valid && !TrackWire(io.bs_wadr.ready), "SOURCED_4_WRITEBACK_STALL", "Data writeback stalled")
   params.ccover(s4_req.prio(0) && s4_req.opcode === ArithmeticData && s4_req.param === MIN,  "SOURCED_4_ATOMIC_MIN",  "Evaluated a signed minimum atomic")
   params.ccover(s4_req.prio(0) && s4_req.opcode === ArithmeticData && s4_req.param === MAX,  "SOURCED_4_ATOMIC_MAX",  "Evaluated a signed maximum atomic")
   params.ccover(s4_req.prio(0) && s4_req.opcode === ArithmeticData && s4_req.param === MINU, "SOURCED_4_ATOMIC_MINU", "Evaluated an unsigned minimum atomic")
@@ -627,17 +627,17 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   params.ccover(s4_req.prio(0) && s4_req.opcode === LogicalData    && s4_req.param === AND,  "SOURCED_4_ATOMIC_AND",  "Evaluated a bitwise AND atomic")
   params.ccover(s4_req.prio(0) && s4_req.opcode === LogicalData    && s4_req.param === SWAP, "SOURCED_4_ATOMIC_SWAP", "Evaluated a bitwise SWAP atomic")
 
-  when (io.bs_wadr.ready || !s4_need_bs) { s4_full := Bool(false) }
+  when (TrackWire(io.bs_wadr.ready) || !s4_need_bs) { s4_full := Bool(false) }
   when (s4_latch) { s4_full := Bool(true) }
 
-  s4_ready := !s3_retires || !s4_full || io.bs_wadr.ready || !s4_need_bs
+  s4_ready := !s3_retires || !s4_full || TrackWire(io.bs_wadr.ready) || !s4_need_bs
 
   ////////////////////////////////////// RETIRED //////////////////////////////////////
 
   // Record for bypass the last three retired writebacks
   // We need 3 slots to collect what was in s2, s3, s4 when the request was in s1
   // ... you can't rely on s4 being full if bubbles got introduced between s1 and s2
-  val retire = s4_full && (io.bs_wadr.ready || !s4_need_bs)
+  val retire = s4_full && (TrackWire(io.bs_wadr.ready) || !s4_need_bs)
   when (retire) {
     DebugPrint(params, "SourceD retire\n")
   }
@@ -692,7 +692,7 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   val pre_s5_dat  = Mux(retire,   atomics.io.data_out, s5_dat)
   val pre_s6_dat  = Mux(retire,   s5_dat,  s6_dat)
   val pre_s7_dat  = Mux(retire,   s6_dat,  s7_dat)
-  val pre_s4_full = s4_latch || (!(io.bs_wadr.ready || !s4_need_bs) && s4_full)
+  val pre_s4_full = s4_latch || (!(TrackWire(io.bs_wadr.ready) || !s4_need_bs) && s4_full)
 
   // TODO: change this
   // 这边的bypass到底是怎么搞的啊？

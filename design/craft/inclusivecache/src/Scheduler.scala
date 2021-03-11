@@ -505,10 +505,11 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   // Reload from the Directory if the next MSHR operation changes tags
   val scheduleTag_issue = cut.io.issue.mshrStatus.tag
   val scheduleSet_issue = cut.io.issue.mshrStatus.set
-  val scheduleMatches = (requests.io.dataFanout.map(_.tag =/= scheduleTag_issue) & pop_onehot.toBools).orR
+  // val scheduleMatches = (requests.io.dataFanout.map(_.tag =/= scheduleTag_issue) & pop_onehot.toBools).orR
+  val scheduleMatches = requests.io.data.tag =/= scheduleTag_issue
   val scheduleMatchesReal = Mux(bypass, scheduleTag_issue =/= request.bits.tag, scheduleMatches)
   val lb_tag_mismatch = scheduleMatches
-  val mshr_uses_directory_assuming_no_bypass = schedule_issue.reload && may_pop && lb_tag_mismatch
+  val mshr_uses_directory_assuming_no_bypass = schedule_issue.reload && may_pop
   val mshr_uses_directory_for_lb = will_pop && lb_tag_mismatch
   val mshr_uses_directory = will_reload && scheduleMatchesReal
 

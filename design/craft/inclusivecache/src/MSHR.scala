@@ -24,6 +24,32 @@ import freechips.rocketchip.tilelink._
 import TLPermissions._
 import TLMessages._
 import MetaData._
+import chisel3.MultiIOModule
+import chisel3.internal.naming.chiselName
+
+@chiselName
+class DummyMux[T <: Data](gen: T) extends Module
+{
+  val io = IO(new Bundle {
+    val cond = Input(Bool())
+    val A = Input(gen.cloneType)
+    val B = Input(gen.cloneType)
+    val O = Output(gen.cloneType)
+  })
+
+  io.O := Mux(io.cond, io.A, io.B)
+}
+
+object DummyMux {
+  @chiselName
+  def apply[T <: Data](cond: Bool, A: T, B: T): T = {
+    val mux = Module(new DummyMux(A))
+    mux.io.cond := cond
+    mux.io.A := A
+    mux.io.B := B
+    mux.io.O
+  }
+}
 
 class PrefetcherAcquire(addressBits: Int) extends Bundle
 {
@@ -787,8 +813,8 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   val allocate_as_full = Wire(new FullRequest(params), init = io.allocate.bits)
   // 如果是allocate并且是repeat的，那么就用自己本地更新的最新的metadata
   // 否则就用directory里面读出来的
-  val new_meta = Mux(io.allocate.valid && io.allocate.bits.repeat, final_meta_writeback, io.directory.bits)
-  val new_request = Mux(io.allocate.valid, allocate_as_full, request)
+  val new_meta = DummyMux(io.allocate.valid && io.allocate.bits.repeat, final_meta_writeback, io.directory.bits)
+  val new_request = DummyMux(io.allocate.valid, allocate_as_full, request)
   // 是否需要trunk权限
   val new_needT = needT(new_request.opcode, new_request.param)
   // new_clientBit这个显然就是自己了

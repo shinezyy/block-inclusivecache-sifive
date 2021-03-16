@@ -606,6 +606,8 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   atomics.io.a.mask    := s4_pdata.mask
   atomics.io.a.data    := s4_pdata.data
   atomics.io.data_in   := s4_rdata
+  val atomics_io_data_out: UInt = Mux(s4_req.prio(2), s4_pdata.data, s4_rdata)
+  assert(atomics.io.data_out === atomics_io_data_out)
 
   io.bs_wadr.valid := s4_full && s4_need_bs
   io.bs_wadr.bits.noop := Bool(false)
@@ -613,7 +615,7 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   io.bs_wadr.bits.set  := s4_req.set
   io.bs_wadr.bits.beat := s4_beat
   io.bs_wadr.bits.mask := Cat(s4_pdata.mask.asBools.grouped(writeBytes).map(_.reduce(_||_)).toList.reverse)
-  io.bs_wdat.data := atomics.io.data_out
+  io.bs_wdat.data := atomics_io_data_out
   assert (!(s4_full && s4_need_pb && s4_pdata.corrupt), "Data poisoning unsupported")
 
   params.ccover(io.bs_wadr.valid && !TrackWire(io.bs_wadr.ready), "SOURCED_4_WRITEBACK_STALL", "Data writeback stalled")
@@ -644,7 +646,7 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
 
   val s5_req  = RegEnable(s4_req,  retire)
   val s5_beat = RegEnable(s4_beat, retire)
-  val s5_dat  = RegEnable(atomics.io.data_out, retire)
+  val s5_dat  = RegEnable(atomics_io_data_out, retire)
   val s5_uncached_get  = RegEnable(s4_uncached_get, retire)
 
   val s6_req  = RegEnable(s5_req,  retire)
@@ -689,7 +691,7 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   val pre_s5_uncached_get  = Mux(retire,   s4_uncached_get,  s5_uncached_get)
   val pre_s6_uncached_get  = Mux(retire,   s5_uncached_get,  s6_uncached_get)
 
-  val pre_s5_dat  = Mux(retire,   atomics.io.data_out, s5_dat)
+  val pre_s5_dat  = Mux(retire,   atomics_io_data_out, s5_dat)
   val pre_s6_dat  = Mux(retire,   s5_dat,  s6_dat)
   val pre_s7_dat  = Mux(retire,   s6_dat,  s7_dat)
   val pre_s4_full = s4_latch || (!(TrackWire(io.bs_wadr.ready) || !s4_need_bs) && s4_full)
@@ -712,7 +714,7 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
 
 
   s3_bypass_data :=
-    bypass(RegNext(pre_s3_4_bypass), atomics.io.data_out, RegNext(
+    bypass(RegNext(pre_s3_4_bypass), atomics_io_data_out, RegNext(
     bypass(pre_s3_5_bypass, pre_s5_dat,
     bypass(pre_s3_6_bypass, pre_s6_dat,
                             pre_s7_dat))))

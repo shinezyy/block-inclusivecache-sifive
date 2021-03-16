@@ -605,8 +605,28 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   atomics.io.a.mask    := s4_pdata.mask
   atomics.io.a.data    := s4_pdata.data
   atomics.io.data_in   := s4_rdata
-  val atomics_io_data_out: UInt = Mux(s4_req.prio(2), s4_pdata.data, s4_rdata)
-  assert(atomics.io.data_out === atomics_io_data_out)
+  val overwrite = s4_req.prio(2) || (s4_adjusted_opcode <= TLMessages.PutPartialData)
+  val masks = Cat(s4_pdata.mask.asBools.map(b => Fill(8, b)).reverse)
+  val atomics_io_data_out: UInt = Mux(overwrite, (s4_pdata.data & masks) | (s4_rdata & ~masks), s4_rdata)
+  assert(atomics.io.data_out === atomics_io_data_out,
+    """write %b
+      |opcode %d
+      |param %d
+      |mask %b
+      |myms %x
+      |data %x
+      |data_in %x
+      |data_out %x
+      |my___out %x""".stripMargin,
+      s4_req.prio(2),
+      s4_adjusted_opcode,
+      s4_req.param,
+      s4_pdata.mask,
+      masks,
+      s4_pdata.data,
+      s4_rdata,
+      atomics.io.data_out,
+      atomics_io_data_out)
 
   io.bs_wadr.valid := s4_full && s4_need_bs
   io.bs_wadr.bits.noop := Bool(false)

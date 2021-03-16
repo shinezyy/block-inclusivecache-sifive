@@ -306,6 +306,30 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   val cut = Module(new ScheduleCut(params))
   val s_select = cut.io.s_select
   val s_issue = cut.io.s_issue
+
+  val source_readys_curr = Cat(
+    sourceA,io.req.ready,
+    sourceB.io.req.ready,
+    sourceC.io.req.ready,
+    sourceD.io.req.ready,
+    sourceE.io.req.ready,
+    sourceX.io.req.ready,
+    directory.io.write.ready)
+  val schedule_select_reqs = Cat(
+    schedule_select.a.valid,
+    schedule_select.b.valid,
+    schedule_select.c.valid,
+    schedule_select.d.valid,
+    schedule_select.e.valid,
+    schedule_select.x.valid)
+  val select_fire_prev = RegNext(source_readys_curr & schedule_select_reqs)
+
+  when (s_issue) {
+    assert(select_fire_prev === (source_readys_curr & RegNext(schedule_select_reqs), "schedule fire changed, expect fire %b, curr ready %b",
+      select_fire_prev,
+      source_readys_curr)
+  }
+
   cut.io.need_to_schedule := TrackWire(mshr_request_select.orR())
   cut.io.select.mshrReqValids := TrackWire(mshr_request_select)
   cut.io.select.mshrStatus := scheduleStatus_select

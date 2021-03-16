@@ -91,6 +91,7 @@ class SourceC(params: InclusiveCacheParameters) extends Module with HasTLDump
   val fillBits = log2Up(beats + 4)
   // 估计fill就是我们自己维护的一个counter？
   val fill = RegInit(UInt(0, width = fillBits))
+  val room_next = Wire(fill)
   val room = RegInit(Bool(true))
   // 如果enq和deq都fire了，那计数器肯定就不用变了
   when (queue.io.enq.fire() =/= queue.io.deq.fire()) {
@@ -98,7 +99,10 @@ class SourceC(params: InclusiveCacheParameters) extends Module with HasTLDump
     fill := fill + Mux(queue.io.enq.fire(), UInt(1), ~UInt(0, width = fillBits))
     // room是empty的意思吗？
     // 估计是empty的意思？那fill 1还可以理解，fill 2就不太好理解了啊？
-    room := fill === UInt(0) || ((fill === UInt(1) || fill === UInt(2)) && !queue.io.enq.fire())
+    room_next := fill === UInt(0) || ((fill === UInt(1) || fill === UInt(2)) && !queue.io.enq.fire())
+    room := room_next
+  }.otherwise {
+    room_next := room
   }
   assert (room === queue.io.count <= UInt(1))
 
@@ -117,7 +121,10 @@ class SourceC(params: InclusiveCacheParameters) extends Module with HasTLDump
 
   // 只要不是不是busy，并且还有room，就OK
   // 似乎假如请求进来不是dirty的，那根本就不会有任何动作吗？
-  io.req.ready := !busy && room
+  io.req.ready := !busy && room && room_next
+  // Promise ready to keep valid at least two cycles.
+  // - busy will only turn down when io.req.fire so it keeps consistency with io.req
+  // - room can change between s_select and s_issue, therefore we should see its next cycle truth value
 
   io.evict_req.set := req.set
   io.evict_req.way := req.way

@@ -321,7 +321,16 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
     schedule_select.c.valid,
     schedule_select.d.valid,
     schedule_select.e.valid,
-    schedule_select.x.valid)
+    schedule_select.x.valid,
+    schedule_select.dir.valid)
+  val schedule_issue_reqs = Cat(
+    cut.io.issue.schedule.a.valid,
+    cut.io.issue.schedule.b.valid,
+    cut.io.issue.schedule.c.valid,
+    cut.io.issue.schedule.d.valid,
+    cut.io.issue.schedule.e.valid,
+    cut.io.issue.schedule.x.valid,
+    cut.io.issue.schedule.dir.valid)
   val select_fire_prev = RegNext(source_readys_curr & schedule_select_reqs)
 
   when (s_issue) {

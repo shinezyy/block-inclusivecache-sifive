@@ -308,7 +308,7 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   val s_issue = cut.io.s_issue
 
   val source_readys_curr = Cat(
-    sourceA,io.req.ready,
+    sourceA.io.req.ready,
     sourceB.io.req.ready,
     sourceC.io.req.ready,
     sourceD.io.req.ready,

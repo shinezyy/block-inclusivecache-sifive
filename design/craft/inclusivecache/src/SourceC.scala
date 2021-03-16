@@ -91,8 +91,8 @@ class SourceC(params: InclusiveCacheParameters) extends Module with HasTLDump
   val fillBits = log2Up(beats + 4)
   // 估计fill就是我们自己维护的一个counter？
   val fill = RegInit(UInt(0, width = fillBits))
-  val room_next = Wire(fill)
   val room = RegInit(Bool(true))
+  val room_next = Wire(room)
   // 如果enq和deq都fire了，那计数器肯定就不用变了
   when (queue.io.enq.fire() =/= queue.io.deq.fire()) {
     // enq那就加1，全1就是-1

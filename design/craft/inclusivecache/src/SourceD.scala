@@ -89,7 +89,6 @@ class AtomicsLocal(params: TLBundleParameters) extends Module
   val select = Mux(io.write, UInt(1), op)
 
   // Only the masked bytes can be modified
-  println(s"atomics io.a.mask size ${io.a.mask.asBools().length}")
   val selects = io.a.mask.asBools.map(b => Mux(b, select, UInt(0)))
   io.data_out := Cat(selects.zipWithIndex.map { case (s, i) =>
     val list = Seq(io.data_in, io.a.data, sum, logical).map(_((i + 1) * 8 - 1, i * 8))

@@ -546,7 +546,7 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
     val schedule_repeat = (schedule_repeat_abc & select_abc).orR
 
     //m.io.allocate.bits.repeat := m.io.allocate.bits.tag === m.io.status.bits.tag
-    m.io.allocate.bits.repeat := Mux(bypass, bypass_repeat, schedule_repeat)
+    m.io.allocate.bits.repeat := false.B
     m.io.allocate.valid := sel && will_reload && s_issue
 
     when (m.io.allocate.valid && bypass) {
@@ -566,8 +566,8 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   val scheduleMatchesReal = Mux(bypass, scheduleTag_issue =/= request.bits.tag, scheduleMatches)
   val lb_tag_mismatch = scheduleMatches
   val mshr_uses_directory_assuming_no_bypass = schedule_issue.reload && may_pop
-  val mshr_uses_directory_for_lb = will_pop && lb_tag_mismatch
-  val mshr_uses_directory = will_reload && scheduleMatchesReal
+  val mshr_uses_directory_for_lb = will_pop
+  val mshr_uses_directory = will_reload
 
   // Is there an MSHR free for this request?
   val mshr_validOH = Cat(mshrs.map(_.io.status.valid).reverse)

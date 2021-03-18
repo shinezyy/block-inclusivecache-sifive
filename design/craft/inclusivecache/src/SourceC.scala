@@ -46,6 +46,7 @@ class SourceC(params: InclusiveCacheParameters) extends Module with HasTLDump
     // RaW hazard
     val evict_req = new SourceDHazard(params)
     val evict_safe = Bool().flip
+    val s_select = Input(Bool())
   }
 
   when (io.req.fire()) {
@@ -92,19 +93,18 @@ class SourceC(params: InclusiveCacheParameters) extends Module with HasTLDump
   // 估计fill就是我们自己维护的一个counter？
   val fill = RegInit(UInt(0, width = fillBits))
   val room = RegInit(Bool(true))
-  val room_next = Wire(room)
+  val room_safe = RegInit(Bool(true))
   // 如果enq和deq都fire了，那计数器肯定就不用变了
   when (queue.io.enq.fire() =/= queue.io.deq.fire()) {
     // enq那就加1，全1就是-1
     fill := fill + Mux(queue.io.enq.fire(), UInt(1), ~UInt(0, width = fillBits))
     // room是empty的意思吗？
     // 估计是empty的意思？那fill 1还可以理解，fill 2就不太好理解了啊？
-    room_next := fill === UInt(0) || ((fill === UInt(1) || fill === UInt(2)) && !queue.io.enq.fire())
-    room := room_next
-  }.otherwise {
-    room_next := room
+    room := fill === UInt(0) || ((fill === UInt(1) || fill === UInt(2)) && !queue.io.enq.fire())
+    room_safe := fill === UInt(1) && queue.io.deq.fire()
   }
   assert (room === queue.io.count <= UInt(1))
+  assert(!room_safe || room, "room_safe valid cycles should be a subset of room")
 
   // room是个什么鬼东西？
 
@@ -121,7 +121,7 @@ class SourceC(params: InclusiveCacheParameters) extends Module with HasTLDump
 
   // 只要不是不是busy，并且还有room，就OK
   // 似乎假如请求进来不是dirty的，那根本就不会有任何动作吗？
-  io.req.ready := !busy && room && room_next
+  io.req.ready := !busy && Mux(io.s_select, room_safe, room)
   // Promise ready to keep valid at least two cycles.
   // - busy will only turn down when io.req.fire so it keeps consistency with io.req
   // - room can change between s_select and s_issue, therefore we should see its next cycle truth value

@@ -306,6 +306,7 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   val cut = Module(new ScheduleCut(params))
   val s_select = cut.io.s_select
   val s_issue = cut.io.s_issue
+  sourceC.io.s_select := s_select
 
   val source_readys_curr = Cat(
     sourceA.io.req.ready,

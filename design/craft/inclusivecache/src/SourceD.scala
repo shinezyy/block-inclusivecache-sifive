@@ -608,7 +608,7 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   val overwrite = s4_req.prio(2) || (s4_adjusted_opcode <= TLMessages.PutPartialData)
   val masks = Cat(s4_pdata.mask.asBools.map(b => Fill(8, b)).reverse)
   val atomics_io_data_out: UInt = Mux(overwrite, (s4_pdata.data & masks) | (s4_rdata & ~masks), s4_rdata)
-  assert(atomics.io.data_out === atomics_io_data_out,
+  assert(!s4_full || (atomics.io.data_out === atomics_io_data_out),
     """write %b
       |opcode %d
       |param %d

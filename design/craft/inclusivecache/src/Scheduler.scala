@@ -34,11 +34,13 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
     val req = Decoupled(new SinkXRequest(params)).flip
     val resp = Decoupled(new SourceXRequest(params))
     val prefetcher = new PrefetcherIO(params.inner.bundle.addressBits)
-    val n_active_mshrs = Output(UInt(log2Ceil(params.mshrs + 1)))
-    val c_has_active_mshrs = Output(UInt(log2Ceil(params.mshrs + 1)))
-    val max_active_mshrs = Output(UInt(log2Ceil(params.mshrs + 1)))
+    private val mshrs_cnt_bits = log2Ceil(params.mshrs + 1)
+    val n_active_mshrs = Output(UInt(mshrs_cnt_bits.W))
+    val c_has_active_mshrs = Output(Bool())
+    val max_active_mshrs = Output(UInt(mshrs_cnt_bits.W))
   }
 
+  println(s"${params.cacheName} mshr count ${params.mshrs}")
   val sourceA = Module(new SourceA(params))
   val sourceB = Module(new SourceB(params))
   val sourceC = Module(new SourceC(params))

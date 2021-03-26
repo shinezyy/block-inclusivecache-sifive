@@ -153,6 +153,29 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   io.prefetcher.release.valid   := sourceC.io.req.fire() && (releaseReq.param === TLPermissions.BtoN || releaseReq.param === TLPermissions.TtoN)
   io.prefetcher.release.bits.address := params.expandAddress(releaseReq.tag, releaseReq.set, UInt(0))
 
+  // connect MSHR performance counters
+  val nGet     = PopCount(Vec(mshrs map { case m => m.io.mshrPerformanceCounters.valid && m.io.mshrPerformanceCounters.bits.get}))
+  val nGetMiss = PopCount(Vec(mshrs map { case m => m.io.mshrPerformanceCounters.valid && m.io.mshrPerformanceCounters.bits.get && m.io.mshrPerformanceCounters.bits.miss}))
+  val nPut     = PopCount(Vec(mshrs map { case m => m.io.mshrPerformanceCounters.valid && m.io.mshrPerformanceCounters.bits.put}))
+  val nPutMiss = PopCount(Vec(mshrs map { case m => m.io.mshrPerformanceCounters.valid && m.io.mshrPerformanceCounters.bits.put && m.io.mshrPerformanceCounters.bits.miss}))
+  val nHint     = PopCount(Vec(mshrs map { case m => m.io.mshrPerformanceCounters.valid && m.io.mshrPerformanceCounters.bits.hint}))
+  val nHintMiss = PopCount(Vec(mshrs map { case m => m.io.mshrPerformanceCounters.valid && m.io.mshrPerformanceCounters.bits.hint && m.io.mshrPerformanceCounters.bits.miss}))
+  val nAcquire     = PopCount(Vec(mshrs map { case m => m.io.mshrPerformanceCounters.valid && m.io.mshrPerformanceCounters.bits.acquire}))
+  val nAcquireMiss = PopCount(Vec(mshrs map { case m => m.io.mshrPerformanceCounters.valid && m.io.mshrPerformanceCounters.bits.acquire && m.io.mshrPerformanceCounters.bits.miss}))
+  XSPerfAccumulate(params, "nGet", nGet)
+  XSPerfAccumulate(params, "nGetMiss", nGetMiss)
+  XSPerfAccumulate(params, "nPut", nPut)
+  XSPerfAccumulate(params, "nPutMiss", nPutMiss)
+  XSPerfAccumulate(params, "nHint", nHint)
+  XSPerfAccumulate(params, "nHintMiss", nHintMiss)
+  XSPerfAccumulate(params, "nAcquire", nAcquire)
+  XSPerfAccumulate(params, "nAcquireMiss", nAcquireMiss)
+
+  val nActiveMSHR = PopCount(Vec(mshrs map { case m => m.io.status.valid}))
+  XSPerfHistogram(params, "nActiveMSHR", nActiveMSHR, Bool(true), 0, params.mshrs, 1)
+
+  // assert(PopCount(validVec) <= 1.U)
+
   // 这边的valid怎么就直接过来了呢？
   // Deliver messages from Sinks to MSHRs
   // 按照tilelink手册的描述，A和C通道的请求是按照地址来的，所以这边直接就按照set来分了？可能不是这个原因

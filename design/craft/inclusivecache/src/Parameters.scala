@@ -34,6 +34,7 @@ case class CacheParameters(
   beatBytes:   Int,
   cacheName:   String = "BlockInclusiveCache",
   debug:       Boolean = false,
+  enablePerf:  Boolean = false,
   verification: Boolean = false) // inner
 {
   require (ways > 0)
@@ -151,8 +152,9 @@ case class InclusiveCacheParameters(
     require (a.alignment >= cache.blockBytes)
   }
 
-  def cacheName = cache.cacheName
-  def debug     = cache.debug
+  def cacheName  = cache.cacheName
+  def debug      = cache.debug
+  def enablePerf = cache.enablePerf
   def verification = cache.verification
   // If we are the first level cache, we do not need to support inner-BCE
   val firstLevel = !inner.client.clients.exists(_.supportsProbe)

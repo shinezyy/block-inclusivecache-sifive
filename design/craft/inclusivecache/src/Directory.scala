@@ -175,12 +175,13 @@ class Directory(params: InclusiveCacheParameters) extends Module
   val writeSet2 = params.dirReg(writeSet1)
 
   for((repl, i) <- replacer_array.zipWithIndex){
-    val readUpdate = ren2 && hit && (i.U === set)
-    val writeUpdate = wen2 && (i.U === writeSet2)
+    val setMatch = i.U === Mux(ren2, set, writeSet2)
     assert(!(ren2 && wen2))
     val updateWay = Wire(UInt(params.wayBits.W))
-    updateWay := Mux(readUpdate, hitWay, writeWay2)
-    when(readUpdate || writeUpdate){ repl.access(updateWay) }
+    updateWay := Mux(ren2, hitWay, writeWay2)
+    when(setMatch && ((ren2 && hit) || wen2)){
+      repl.access(updateWay)
+    }
   }
 
   io.result.valid := ren2

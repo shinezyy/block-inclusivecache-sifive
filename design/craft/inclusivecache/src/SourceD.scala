@@ -24,6 +24,78 @@ import TLMessages._
 import TLAtomics._
 import TLPermissions._
 
+class AtomicsLocal(params: TLBundleParameters) extends Module
+{
+  val io = new Bundle {
+    val write    = Bool().flip // ignore opcode
+    val a        = new TLBundleA(params).flip
+    val data_in  = UInt(width = params.dataBits).flip
+    val data_out = UInt(width = params.dataBits)
+  }
+
+  // Arithmetic, what to do
+  val adder    = io.a.param(2)
+  val unsigned = io.a.param(1)
+  val take_max = io.a.param(0)
+
+  val signBit = io.a.mask & Cat(UInt(1), ~io.a.mask >> 1)
+  val inv_d = Mux(adder, io.data_in, ~io.data_in)
+  val sum = (FillInterleaved(8, io.a.mask) & io.a.data) + inv_d
+  def sign(x: UInt): Bool = (Cat(x.asBools.grouped(8).map(_.last).toList.reverse) & signBit).orR()
+  val sign_a = sign(io.a.data)
+  val sign_d = sign(io.data_in)
+  val sign_s = sign(sum)
+  val a_bigger_uneq = unsigned === sign_a // result if high bits are unequal
+  val a_bigger = Mux(sign_a === sign_d, !sign_s, a_bigger_uneq)
+  val pick_a = take_max === a_bigger
+
+  // Logical, what to do
+  val lut = MuxLookup(io.a.param(1, 0), 0x6.U, List(
+    0.U -> 0x6.U,
+    1.U -> 0xe.U,
+    2.U -> 0x8.U,
+    3.U -> 0xc.U
+  ))
+  val lutx = Vec(Seq(
+    UInt(0x6),   // XOR
+    UInt(0xe),   // OR
+    UInt(0x8),   // AND
+    UInt(0xc)))( // SWAP
+    io.a.param(1,0))
+  assert(lutx === lut)
+
+  val logical = Cat((io.a.data.asBools zip io.data_in.asBools).map { case (a, d) =>
+    lut(Cat(a, d))
+  }.reverse)
+
+  // Operation, what to do? (0=d, 1=a, 2=sum, 3=logical)
+  val op = MuxLookup(io.a.opcode, 0.U, List(
+    0.U -> 1.U,
+    1.U -> 1.U,
+    2.U -> Mux(adder, UInt(2), Mux(pick_a, UInt(1), UInt(0))), // ArithmeticData
+    3.U -> 3.U
+  ))
+  val opx = Vec(Seq(
+    UInt(1),   // PutFullData
+    UInt(1),   // PutPartialData
+    Mux(adder, UInt(2), Mux(pick_a, UInt(1), UInt(0))), // ArithmeticData
+    UInt(3),   // LogicalData
+    UInt(0),   // Get
+    UInt(0),   // Hint
+    UInt(0),   // AcquireBlock
+    UInt(0)))( // AcquirePerm
+    io.a.opcode)
+  assert(op === opx)
+  val select = Mux(io.write, UInt(1), op)
+
+  // Only the masked bytes can be modified
+  val selects = io.a.mask.asBools.map(b => Mux(b, select, UInt(0)))
+  io.data_out := Cat(selects.zipWithIndex.map { case (s, i) =>
+    val list = Seq(io.data_in, io.a.data, sum, logical).map(_((i + 1) * 8 - 1, i * 8))
+    MuxLookup(s, 0.U, list.zipWithIndex.map { case (u, idx) => idx.U -> u })
+  }.reverse)
+}
+
 class SourceDRequest(params: InclusiveCacheParameters) extends FullRequest(params)
 {
   val sink = UInt(width = params.inner.bundle.sinkBits)
@@ -160,8 +232,8 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   io.grant_req.dump()
   */
 
-  when (io.grant_safe) {
-    DebugPrint(params, "SourceD grant_safe\n")
+  when (!io.grant_safe) {
+    DebugPrint(params, "SourceD not grant_safe\n")
   }
 
   // 总线宽度，暂时不知道是对内还是对外
@@ -523,7 +595,7 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
       s4_req.prio.asUInt, s4_req.control, s4_req.opcode, s4_req.param, s4_req.size, s4_req.source, s4_req.tag, s4_req.set, s4_req.offset, s4_req.put, s4_req.sink, s4_req.way)
   }
 
-  val atomics = Module(new Atomics(params.inner.bundle))
+  val atomics = Module(new AtomicsLocal(params.inner.bundle))
   atomics.io.write     := s4_req.prio(2)
   atomics.io.a.opcode  := s4_adjusted_opcode
   atomics.io.a.param   := s4_req.param
@@ -533,6 +605,28 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   atomics.io.a.mask    := s4_pdata.mask
   atomics.io.a.data    := s4_pdata.data
   atomics.io.data_in   := s4_rdata
+  val overwrite = s4_req.prio(2) || (s4_adjusted_opcode <= TLMessages.PutPartialData)
+  val masks = Cat(s4_pdata.mask.asBools.map(b => Fill(8, b)).reverse)
+  val atomics_io_data_out: UInt = Mux(overwrite, (s4_pdata.data & masks) | (s4_rdata & ~masks), s4_rdata)
+  assert(!s4_full || (atomics.io.data_out === atomics_io_data_out),
+    """write %b
+      |opcode %d
+      |param %d
+      |mask %b
+      |myms %x
+      |data %x
+      |data_in %x
+      |data_out %x
+      |my___out %x""".stripMargin,
+      s4_req.prio(2),
+      s4_adjusted_opcode,
+      s4_req.param,
+      s4_pdata.mask,
+      masks,
+      s4_pdata.data,
+      s4_rdata,
+      atomics.io.data_out,
+      atomics_io_data_out)
 
   io.bs_wadr.valid := s4_full && s4_need_bs
   io.bs_wadr.bits.noop := Bool(false)
@@ -540,10 +634,10 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   io.bs_wadr.bits.set  := s4_req.set
   io.bs_wadr.bits.beat := s4_beat
   io.bs_wadr.bits.mask := Cat(s4_pdata.mask.asBools.grouped(writeBytes).map(_.reduce(_||_)).toList.reverse)
-  io.bs_wdat.data := atomics.io.data_out
+  io.bs_wdat.data := atomics_io_data_out
   assert (!(s4_full && s4_need_pb && s4_pdata.corrupt), "Data poisoning unsupported")
 
-  params.ccover(io.bs_wadr.valid && !io.bs_wadr.ready, "SOURCED_4_WRITEBACK_STALL", "Data writeback stalled")
+  params.ccover(io.bs_wadr.valid && !TrackWire(io.bs_wadr.ready), "SOURCED_4_WRITEBACK_STALL", "Data writeback stalled")
   params.ccover(s4_req.prio(0) && s4_req.opcode === ArithmeticData && s4_req.param === MIN,  "SOURCED_4_ATOMIC_MIN",  "Evaluated a signed minimum atomic")
   params.ccover(s4_req.prio(0) && s4_req.opcode === ArithmeticData && s4_req.param === MAX,  "SOURCED_4_ATOMIC_MAX",  "Evaluated a signed maximum atomic")
   params.ccover(s4_req.prio(0) && s4_req.opcode === ArithmeticData && s4_req.param === MINU, "SOURCED_4_ATOMIC_MINU", "Evaluated an unsigned minimum atomic")
@@ -554,24 +648,24 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   params.ccover(s4_req.prio(0) && s4_req.opcode === LogicalData    && s4_req.param === AND,  "SOURCED_4_ATOMIC_AND",  "Evaluated a bitwise AND atomic")
   params.ccover(s4_req.prio(0) && s4_req.opcode === LogicalData    && s4_req.param === SWAP, "SOURCED_4_ATOMIC_SWAP", "Evaluated a bitwise SWAP atomic")
 
-  when (io.bs_wadr.ready || !s4_need_bs) { s4_full := Bool(false) }
+  when (TrackWire(io.bs_wadr.ready) || !s4_need_bs) { s4_full := Bool(false) }
   when (s4_latch) { s4_full := Bool(true) }
 
-  s4_ready := !s3_retires || !s4_full || io.bs_wadr.ready || !s4_need_bs
+  s4_ready := !s3_retires || !s4_full || TrackWire(io.bs_wadr.ready) || !s4_need_bs
 
   ////////////////////////////////////// RETIRED //////////////////////////////////////
 
   // Record for bypass the last three retired writebacks
   // We need 3 slots to collect what was in s2, s3, s4 when the request was in s1
   // ... you can't rely on s4 being full if bubbles got introduced between s1 and s2
-  val retire = s4_full && (io.bs_wadr.ready || !s4_need_bs)
+  val retire = s4_full && (TrackWire(io.bs_wadr.ready) || !s4_need_bs)
   when (retire) {
     DebugPrint(params, "SourceD retire\n")
   }
 
   val s5_req  = RegEnable(s4_req,  retire)
   val s5_beat = RegEnable(s4_beat, retire)
-  val s5_dat  = RegEnable(atomics.io.data_out, retire)
+  val s5_dat  = RegEnable(atomics_io_data_out, retire)
   val s5_uncached_get  = RegEnable(s4_uncached_get, retire)
 
   val s6_req  = RegEnable(s5_req,  retire)
@@ -616,10 +710,10 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   val pre_s5_uncached_get  = Mux(retire,   s4_uncached_get,  s5_uncached_get)
   val pre_s6_uncached_get  = Mux(retire,   s5_uncached_get,  s6_uncached_get)
 
-  val pre_s5_dat  = Mux(retire,   atomics.io.data_out, s5_dat)
+  val pre_s5_dat  = Mux(retire,   atomics_io_data_out, s5_dat)
   val pre_s6_dat  = Mux(retire,   s5_dat,  s6_dat)
   val pre_s7_dat  = Mux(retire,   s6_dat,  s7_dat)
-  val pre_s4_full = s4_latch || (!(io.bs_wadr.ready || !s4_need_bs) && s4_full)
+  val pre_s4_full = s4_latch || (!(TrackWire(io.bs_wadr.ready) || !s4_need_bs) && s4_full)
 
   // TODO: change this
   // 这边的bypass到底是怎么搞的啊？
@@ -637,14 +731,9 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   val pre_s3_5_bypass = Mux(pre_s3_5_match, MaskGen(pre_s5_req.offset, pre_s5_req.size, beatBytes, writeBytes), UInt(0))
   val pre_s3_6_bypass = Mux(pre_s3_6_match, MaskGen(pre_s6_req.offset, pre_s6_req.size, beatBytes, writeBytes), UInt(0))
 
-  DebugPrint(params, "SourceD pre_s3_4_match: %b pre_s3_5_match: %b, pre_s3_6_match: %b\n",
-    pre_s3_4_match, pre_s3_5_match, pre_s3_6_match)
-
-  DebugPrint(params, "SourceD pre_s3_4_bypass: %b pre_s3_5_bypass: %b, pre_s3_6_bypass: %b\n",
-    pre_s3_4_bypass, pre_s3_5_bypass, pre_s3_6_bypass)
 
   s3_bypass_data :=
-    bypass(RegNext(pre_s3_4_bypass), atomics.io.data_out, RegNext(
+    bypass(RegNext(pre_s3_4_bypass), atomics_io_data_out, RegNext(
     bypass(pre_s3_5_bypass, pre_s5_dat,
     bypass(pre_s3_6_bypass, pre_s6_dat,
                             pre_s7_dat))))
@@ -655,9 +744,6 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   val s1_2_match  = s2_req.set === s1_req.set && s2_req.way === s1_req.way && s2_beat === s1_beat && s2_full && s2_retires && !s1_uncached_get && !s2_uncached_get
   val s1_3_match  = s3_req.set === s1_req.set && s3_req.way === s1_req.way && s3_beat === s1_beat && s3_full && s3_retires && !s1_uncached_get && !s3_uncached_get
   val s1_4_match  = s4_req.set === s1_req.set && s4_req.way === s1_req.way && s4_beat === s1_beat && s4_full && !s1_uncached_get && !s4_uncached_get
-
-  DebugPrint(params, "SourceD s1_2_match: %b s1_3_match: %b, s1_4_match: %b\n",
-    s1_2_match, s1_3_match, s1_4_match)
 
   for (i <- 0 until 8) {
     val cover = UInt(i)

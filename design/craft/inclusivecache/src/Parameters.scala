@@ -120,7 +120,7 @@ case class InclusiveCacheMicroParameters(
   writeBytes: Int, // backing store update granularity
   memCycles:  Int = 40, // # of L2 clock cycles for a memory round-trip (50ns @ 800MHz)
   portFactor: Int = 4,  // numSubBanks = (widest TL port * portFactor) / writeBytes
-  dirReg:     Boolean = false,
+  dirReg:     Boolean = true,
   innerBuf:   InclusiveCachePortParameters = InclusiveCachePortParameters.fullC, // or none
   outerBuf:   InclusiveCachePortParameters = InclusiveCachePortParameters.full)   // or flowAE
 {

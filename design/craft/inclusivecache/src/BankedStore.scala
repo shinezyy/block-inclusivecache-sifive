@@ -191,12 +191,15 @@ class BankedStore(params: InclusiveCacheParameters) extends Module
 
   io.sourceC_dat.data := Cat(decodeC.reverse)
 
-  val decodeD = regout.zipWithIndex.map {
+  val decodeDX = regout.zipWithIndex.map {
     // Intentionally not Mux1H and/or an indexed-mux b/c we want it 0 when !sel to save decode power
     case (r, i) => Mux(regsel_sourceD(i), r, UInt(0))
   }.grouped(innerBytes/params.micro.writeBytes).toList.transpose.map(s => s.reduce(_|_))
 
-  io.sourceD_rdat.data := Cat(decodeD.reverse)
+  val decodeD = Mux1H(regsel_sourceD, regout)
+  assert(Cat(decodeDX.reverse) === decodeD)
+
+  io.sourceD_rdat.data := decodeD
 
   private def banks = cc_banks.zipWithIndex.map{ case (_, i) => "\"" + s"cc_banks_$i" + "\"" }.mkString(",")
   def json: String = s"""{"widthBytes":${params.micro.writeBytes},"mem":[${banks}]}"""

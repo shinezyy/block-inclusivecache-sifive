@@ -189,6 +189,8 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     val nestedwb  = new NestedWriteback(params).flip
     val mshr_id   = Input(UInt())
     val prefetcherAcquire = Valid(new PrefetcherAcquire(params.inner.bundle.addressBits))
+
+    val issueMeta = Valid(new DirectoryWrite(params)).flip
   }
 
   when (io.allocate.valid) {
@@ -1102,5 +1104,13 @@ class MSHR(params: InclusiveCacheParameters) extends Module
         s_writeback := Bool(false)
       }
     }
+  }
+
+  when (io.status.valid && io.issueMeta.valid) {
+    DebugPrint(params, s"MSHR %d: update forwarding meta\n", io.mshr_id)
+    meta.dump()
+    DebugPrint(params, "=================")
+    io.issueMeta.bits.dump()
+    meta := io.issueMeta.bits.data
   }
 }

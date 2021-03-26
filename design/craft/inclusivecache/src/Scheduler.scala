@@ -577,8 +577,9 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   val bypassQueue = schedule_issue.reload && bypassMatches
   val request_alloc_cases =
      (alloc && !mshr_uses_directory_assuming_no_bypass && mshr_free) ||
-     (nestB && !mshr_uses_directory_assuming_no_bypass && !bc_mshr.io.status.valid && !c_mshr.io.status.valid) ||
-     (nestC && !mshr_uses_directory_assuming_no_bypass && !c_mshr.io.status.valid)
+     (!cut.io.need_to_schedule && (
+       (nestB && !mshr_uses_directory_assuming_no_bypass && !bc_mshr.io.status.valid && !c_mshr.io.status.valid) ||
+       (nestC && !mshr_uses_directory_assuming_no_bypass && !c_mshr.io.status.valid)))
 
   val can_bypass_in_issue = schedule_select.reload && bypassMatches
   request.ready := false.B
@@ -631,7 +632,7 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
     }
   }
 
-  when (request.valid && nestB && !bc_mshr.io.status.valid && !c_mshr.io.status.valid && !mshr_uses_directory_assuming_no_bypass) {
+  when (!cut.io.need_to_schedule && request.valid && nestB && !bc_mshr.io.status.valid && !c_mshr.io.status.valid && !mshr_uses_directory_assuming_no_bypass) {
     bc_mshr.io.allocate.valid := Bool(true)
     bc_mshr.io.allocate.bits := request.bits
     bc_mshr.io.allocate.bits.repeat := Bool(false)
@@ -643,7 +644,7 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   }
   bc_mshr.io.allocate.bits.prio(0) := Bool(false)
 
-  when (request.valid && nestC && !c_mshr.io.status.valid && !mshr_uses_directory_assuming_no_bypass) {
+  when (!cut.io.need_to_schedule && request.valid && nestC && !c_mshr.io.status.valid && !mshr_uses_directory_assuming_no_bypass) {
     c_mshr.io.allocate.valid := Bool(true)
     c_mshr.io.allocate.bits := request.bits
     c_mshr.io.allocate.bits.repeat := Bool(false)
@@ -656,6 +657,25 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   }
   c_mshr.io.allocate.bits.prio(0) := Bool(false)
   c_mshr.io.allocate.bits.prio(1) := Bool(false)
+
+  ///////////////////////////////////////////
+  // Handle meta write forwarding if nestC
+  // which allows the same address in mshrs
+  // at the same time:
+  // previous mshr and new mshr both read out
+  // old meta entry and discard one's update.
+  ///////////////////////////////////////////
+  mshrs.foreach { m =>
+    m.io.issueMeta.valid := false.B
+    m.io.issueMeta.bits := 0.U.asTypeOf(m.io.issueMeta.bits)
+  }
+
+  when (s_issue && schedule_issue.dir.valid) {
+    when (schedule_issue.dir.bits.set === c_mshr.io.status.bits.set
+          && schedule_issue.dir.bits.way === c_mshr.io.status.bits.way) {
+      c_mshr.io.issueMeta := schedule_issue.dir
+    }
+  }
 
   // Fanout the result of the Directory lookup
   val dirTarget = Mux(alloc, mshr_insertOH, Mux(nestB, UInt(1 << (params.mshrs-2)), UInt(1 << (params.mshrs-1))))

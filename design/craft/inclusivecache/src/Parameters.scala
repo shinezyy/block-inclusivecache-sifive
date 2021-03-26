@@ -32,6 +32,7 @@ case class CacheParameters(
   sets:        Int,
   blockBytes:  Int,
   beatBytes:   Int,
+  replacement: String = "plru",
   cacheName:   String = "BlockInclusiveCache",
   debug:       Boolean = false,
   verification: Boolean = false) // inner

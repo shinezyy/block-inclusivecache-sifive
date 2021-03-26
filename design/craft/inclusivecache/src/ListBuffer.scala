@@ -112,3 +112,65 @@ class ListBuffer[T <: Data](params: ListBufferParameters[T]) extends Module
     valid := (valid & ~valid_clr) | valid_set
   }
 }
+
+
+class ListBufferLite[T <: Data](params: ListBufferParameters[T]) extends Module
+{
+  val io = new Bundle {
+    // push is visible on the same cycle; flow queues
+    val push  = Decoupled(new ListBufferPush(params)).flip
+    val push_onehot_index = UInt(width = params.queues).asInput
+    val valid = UInt(width = params.queues)
+    val pop   = Valid(UInt(width = params.queueBits)).flip
+    val pop_onehot_index = UInt(width = params.queues).asInput
+    val data  = params.gen.asOutput
+    val dataFanout = Vec(params.queues, data).asOutput
+  }
+
+  // queues估计是总共有多少queue
+  // entrys是总共有多少entry
+  // 然后每个entry就是T
+  // 哪几个queue是valid的？
+  val valid = RegInit(UInt(0, width=params.queues))
+  //val head  = Mem(params.queues, UInt(width = params.entryBits))
+  //val tail  = Mem(params.queues, UInt(width = params.entryBits))
+  //val data  = Mem(params.queues, params.gen)
+  val data = Reg(Vec(params.queues, params.gen))
+  io.dataFanout := data
+
+  val valid_set = Wire(init = UInt(0, width=params.queues))
+  val valid_clr = Wire(init = UInt(0, width=params.queues))
+
+  // 看是否还有空的entry
+  val push_ready_origin: UInt = ~valid(io.push.bits.index)
+  io.push.ready := ~((valid & io.push_onehot_index).orR)
+  assert(!io.push.valid || push_ready_origin === io.push.ready, "push valid %b index %x onehot %b valids %b orig %b", io.push.valid, io.push.bits.index, io.push_onehot_index, valid, push_ready_origin)
+  when (io.push.fire()) {
+    // 进入哪个queue
+    valid_set := UIntToOH(io.push.bits.index, params.queues)
+    // 数据局写入
+    //data.write(io.push_onehot_index, io.push.bits.data)
+    (data zip io.push_onehot_index.toBools()) foreach { case (element, enable) =>
+      when (enable) {
+        element := io.push.bits.data
+      }
+    }
+  }
+
+  val pop_valid = valid(io.pop.bits)
+
+  // Bypass push data to the peek port
+  //io.data := data.read(io.pop_onehot_index)
+  io.data := Mux1H(io.pop_onehot_index.toBools(), data)
+  io.valid := valid
+
+  // It is an error to pop something that is not valid
+  assert (!io.pop.fire() || (io.valid)(io.pop.bits))
+
+  when (io.pop.fire()) {
+    valid_clr := UIntToOH(io.pop.bits, params.queues)
+  }
+
+  // Empty bypass changes no state
+  valid := (valid & (~valid_clr).asUInt) | valid_set
+}

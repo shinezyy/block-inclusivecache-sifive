@@ -24,6 +24,32 @@ import freechips.rocketchip.tilelink._
 import TLPermissions._
 import TLMessages._
 import MetaData._
+import chisel3.MultiIOModule
+import chisel3.internal.naming.chiselName
+
+@chiselName
+class DummyMux[T <: Data](gen: T) extends Module
+{
+  val io = IO(new Bundle {
+    val cond = Input(Bool())
+    val A = Input(gen.cloneType)
+    val B = Input(gen.cloneType)
+    val O = Output(gen.cloneType)
+  })
+
+  io.O := Mux(io.cond, io.A, io.B)
+}
+
+object DummyMux {
+  @chiselName
+  def apply[T <: Data](cond: Bool, A: T, B: T): T = {
+    val mux = Module(new DummyMux(A))
+    mux.io.cond := cond
+    mux.io.A := A
+    mux.io.B := B
+    mux.io.O
+  }
+}
 
 class PrefetcherAcquire(addressBits: Int) extends Bundle
 {
@@ -44,6 +70,15 @@ class PrefetcherIO(addressBits: Int) extends Bundle
   val acquire = Valid(new PrefetcherAcquire(addressBits))
   val release = Valid(new PrefetcherRelease(addressBits))
   override def cloneType = (new PrefetcherIO(addressBits)).asInstanceOf[this.type]
+}
+
+class MSHRPerformanceCounters extends Bundle
+{
+  val get     = Bool()
+  val put     = Bool()
+  val hint    = Bool()
+  val acquire = Bool()
+  val miss    = Bool()
 }
 
 // 这些似乎是对外的一些接口
@@ -163,6 +198,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     val nestedwb  = new NestedWriteback(params).flip
     val mshr_id   = Input(UInt())
     val prefetcherAcquire = Valid(new PrefetcherAcquire(params.inner.bundle.addressBits))
+    val mshrPerformanceCounters = Valid(new MSHRPerformanceCounters)
   }
 
   when (io.allocate.valid) {
@@ -787,8 +823,8 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   val allocate_as_full = Wire(new FullRequest(params), init = io.allocate.bits)
   // 如果是allocate并且是repeat的，那么就用自己本地更新的最新的metadata
   // 否则就用directory里面读出来的
-  val new_meta = Mux(io.allocate.valid && io.allocate.bits.repeat, final_meta_writeback, io.directory.bits)
-  val new_request = Mux(io.allocate.valid, allocate_as_full, request)
+  val new_meta = DummyMux(io.allocate.valid && io.allocate.bits.repeat, final_meta_writeback, io.directory.bits)
+  val new_request = DummyMux(io.allocate.valid, allocate_as_full, request)
   // 是否需要trunk权限
   val new_needT = needT(new_request.opcode, new_request.param)
   // new_clientBit这个显然就是自己了
@@ -843,6 +879,14 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.prefetcherAcquire.bits.address       := 0.U
   io.prefetcherAcquire.bits.write         := Bool(false)
   io.prefetcherAcquire.bits.hit           := Bool(false)
+
+  io.mshrPerformanceCounters.valid := Bool(false)
+  io.mshrPerformanceCounters.bits.get := Bool(false)
+  io.mshrPerformanceCounters.bits.put := Bool(false)
+  io.mshrPerformanceCounters.bits.hint := Bool(false)
+  io.mshrPerformanceCounters.bits.acquire := Bool(false)
+  io.mshrPerformanceCounters.bits.miss := Bool(false)
+
   when (io.directory.valid || (io.allocate.valid && io.allocate.bits.repeat)) {
     val dcacheRead = new_request.opcode === TLMessages.AcquireBlock && new_request.param === TLPermissions.NtoB
     val dcacheWrite = (new_request.opcode === TLMessages.AcquireBlock || new_request.opcode === TLMessages.AcquirePerm) && (new_request.param === TLPermissions.NtoT || new_request.param === TLPermissions.BtoT)
@@ -851,6 +895,13 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     io.prefetcherAcquire.bits.address       := params.expandAddress(new_request.tag, new_request.set, UInt(0))
     io.prefetcherAcquire.bits.write         := dcacheWrite
     io.prefetcherAcquire.bits.hit           := new_meta.prefetch_hit
+
+    io.mshrPerformanceCounters.valid := Bool(true)
+    io.mshrPerformanceCounters.bits.get := new_request.opcode === Get
+    io.mshrPerformanceCounters.bits.put := (new_request.opcode === PutFullData) || (new_request.opcode === PutPartialData)
+    io.mshrPerformanceCounters.bits.hint := new_request.opcode === Hint
+    io.mshrPerformanceCounters.bits.acquire := (new_request.opcode === AcquireBlock) || (new_request.opcode === AcquirePerm)
+    io.mshrPerformanceCounters.bits.miss := !new_meta.hit
 
     meta_valid := Bool(true)
     meta := new_meta
@@ -972,7 +1023,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
       outer_probe_shrink_permission := isShrink
 
       // Do we need to actually do something?
-      when (isShrink) {
+      when (TrackWire(isShrink)) {
         s_writeback := Bool(false)
         // 当当前的块儿是trunk时，肯定得有client是tip
         assert(new_meta.state =/= TRUNK || new_meta.clients =/= UInt(0))
@@ -981,7 +1032,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
         // 我们只需要把自己的tip给丢掉就可以了
         val tip_with_branch_toB = new_meta.state === TIP && new_meta.clients =/= UInt(0) && probe_toB
         // Do we need to shoot-down inner caches?
-        when (Bool(!params.firstLevel) && (new_meta.clients =/= UInt(0)) && !tip_with_branch_toB) {
+        when (Bool(!params.firstLevel) && TrackWire((new_meta.clients =/= UInt(0))) && TrackWire(!tip_with_branch_toB)) {
           s_pprobe := Bool(false)
           w_pprobeackfirst := Bool(false)
           w_pprobeacklast := Bool(false)
@@ -1049,9 +1100,9 @@ class MSHR(params: InclusiveCacheParameters) extends Module
       // 如果我们需要tip权限，并且client有拿着块儿的
       // 或者我们是trunk权限，我们现在根本就不是最新的块儿，根本就无法处理，也要把内部再probe一下
       // 我们要把这个块儿给probe
-      when (Bool(!params.firstLevel) && (new_meta.hit &&
-            (new_needT || new_meta.state === TRUNK) &&
-            (new_meta.clients & ~new_skipProbe) =/= UInt(0))) {
+      when (Bool(!params.firstLevel) && (TrackWire(new_meta.hit) &&
+            TrackWire((new_needT || new_meta.state === TRUNK)) &&
+            TrackWire((new_meta.clients & ~new_skipProbe) =/= UInt(0)))) {
               // s_pprobe和s_pprobe是干啥的呢？
         s_pprobe := Bool(false)
         w_pprobeackfirst := Bool(false)

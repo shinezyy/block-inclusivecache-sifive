@@ -19,7 +19,7 @@ object DebugPrint {
 
   def apply(params: InclusiveCacheParameters, pable: Printable): Any = {
     if (params.debug) {
-      val commonInfo = p"9527 [time=${GTimer()}] ${params.cacheName}: "
+      val commonInfo = p"[DEBUG][time=${GTimer()}] 9527: "
       printf(commonInfo + pable)
     }
   }

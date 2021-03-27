@@ -1100,8 +1100,9 @@ class MSHR(params: InclusiveCacheParameters) extends Module
       // 如果我们需要tip权限，并且client有拿着块儿的
       // 或者我们是trunk权限，我们现在根本就不是最新的块儿，根本就无法处理，也要把内部再probe一下
       // 我们要把这个块儿给probe
+      // 为了防止在Hint命中时，误把L1的块给拿下来，我们这里做了一下额外的检查。
       when (Bool(!params.firstLevel) && (TrackWire(new_meta.hit) &&
-            TrackWire((new_needT || new_meta.state === TRUNK)) &&
+            TrackWire((new_needT || new_meta.state === TRUNK) && new_request.opcode =/= Hint) &&
             TrackWire((new_meta.clients & ~new_skipProbe) =/= UInt(0)))) {
               // s_pprobe和s_pprobe是干啥的呢？
         s_pprobe := Bool(false)

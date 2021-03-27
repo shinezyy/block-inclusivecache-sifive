@@ -18,7 +18,7 @@ object XSPerfAccumulate {
       counter := Mux(perfClean, 0.U, next_counter)
 
       when (perfDump) {
-        XSPerfPrint(params, p"$perfName, $next_counter\n")
+        XSPerfPrint(p"$perfName, $next_counter\n")
       }
     }
   }
@@ -61,7 +61,7 @@ object XSPerfHistogram {
         }
 
         when (perfDump) {
-          XSPerfPrint(params, p"${perfName}_${binRangeStart}_${binRangeStop}, $counter\n")
+          XSPerfPrint(p"${perfName}_${binRangeStart}_${binRangeStop}, $counter\n")
         }
       }
     }
@@ -82,7 +82,7 @@ object XSPerfMax {
       max := Mux(perfClean, 0.U, next_max)
 
       when (perfDump) {
-        XSPerfPrint(params, p"${perfName}_max, $next_max\n")
+        XSPerfPrint(p"${perfName}_max, $next_max\n")
       }
     }
   }
@@ -102,10 +102,10 @@ object TransactionLatencyCounter
 }
 
 object XSPerfPrint {
-  def apply(params: InclusiveCacheParameters, fmt: String, data: Bits*): Any =
-    apply(params, Printable.pack(fmt, data:_*))
+  def apply(fmt: String, data: Bits*): Any =
+    apply(Printable.pack(fmt, data:_*))
 
-  def apply(params: InclusiveCacheParameters, pable: Printable): Any = {
+  def apply(pable: Printable): Any = {
     val commonInfo = p"[PERF ][time=${GTimer()}] 9527: "
     printf(commonInfo + pable)
   }

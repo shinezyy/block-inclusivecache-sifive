@@ -537,9 +537,9 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.a.bits.tag     := request.tag
   io.schedule.bits.a.bits.set     := request.set
   // Get should always set param to zero
-  io.schedule.bits.a.bits.param   := Mux(request.opcode === Get, 0.U,
+  io.schedule.bits.a.bits.param   := Mux(request.opcode === Get && params.uncachedGet.B, 0.U,
     Mux(req_needT, Mux(meta.hit, BtoT, NtoT), NtoB))
-  io.schedule.bits.a.bits.opcode  := Mux(request.opcode === Get, Get,
+  io.schedule.bits.a.bits.opcode  := Mux(request.opcode === Get && params.uncachedGet.B, Get,
     Mux(block, AcquireBlock, AcquirePerm))
   io.schedule.bits.a.bits.source  := UInt(0)
   // 如果是rprobe，那就是要替换，那就是直接toN
@@ -842,7 +842,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   }
 
 
-  when (io.allocate.valid && io.allocate.bits.repeat && !uncached_get) {
+  when (io.allocate.valid && io.allocate.bits.repeat && (!uncached_get || !params.uncachedGet.B)) {
     bypass(S_INVALID,   f || p) // Can lose permissions (probe/flush)
     bypass(S_BRANCH,    b)      // MMIO read to read-only device
     bypass(S_BRANCH_C,  b && c) // you need children to become C
@@ -1056,8 +1056,8 @@ class MSHR(params: InclusiveCacheParameters) extends Module
       // release这里就不需要标注write back了，因为早晚会被write back吗？
 
       // Get are uncached, we does not needs to allocate lines for it
-      uncached_get := !new_meta.hit && new_request.opcode === TLMessages.Get
-      when (!new_meta.hit && new_meta.state =/= INVALID && new_request.opcode =/= TLMessages.Get) {
+      uncached_get := !new_meta.hit && new_request.opcode === TLMessages.Get && params.uncachedGet.B
+      when (!new_meta.hit && new_meta.state =/= INVALID && (new_request.opcode =/= TLMessages.Get || !params.uncachedGet.B)) {
         s_release := Bool(false)
         w_releaseack := Bool(false)
         // Do we need to shoot-down inner caches?
@@ -1091,7 +1091,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
         w_grantlast := Bool(false)
         w_grant := Bool(false)
         // 我感觉对于get，也没有任何writeback的必要啊
-        when (new_request.opcode =/= TLMessages.Get) {
+        when (new_request.opcode =/= TLMessages.Get || !params.uncachedGet.B) {
           s_grantack := Bool(false)
           s_writeback := Bool(false)
         }

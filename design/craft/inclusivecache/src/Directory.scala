@@ -21,6 +21,7 @@ import Chisel._
 import freechips.rocketchip.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.util.ReplacementPolicy
 import MetaData._
 
 class DirectoryEntry(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
@@ -149,15 +150,10 @@ class Directory(params: InclusiveCacheParameters) extends Module
   val set = params.dirReg(RegEnable(io.read.bits.set, ren), ren1)
 
   // Compute the victim way in case of an evicition
-  val victimLFSR = LFSR16(params.dirReg(ren))(InclusiveCacheParameters.lfsrBits-1, 0)
-  val victimSums = Seq.tabulate(params.cache.ways) { i => UInt((1 << InclusiveCacheParameters.lfsrBits)*i / params.cache.ways) }
-  val victimLTE  = Cat(victimSums.map { _ <= victimLFSR }.reverse)
-  val victimSimp = Cat(UInt(0, width=1), victimLTE(params.cache.ways-1, 1), UInt(1, width=1))
-  val victimWayOH = victimSimp(params.cache.ways-1,0) & ~(victimSimp >> 1)
-  val victimWay = OHToUInt(victimWayOH)
-  assert (!ren2 || victimLTE(0) === UInt(1))
-  assert (!ren2 || ((victimSimp >> 1) & ~victimSimp) === UInt(0)) // monotone
-  assert (!ren2 || PopCount(victimWayOH) === UInt(1))
+  val replacer_array = Array.fill(params.cache.sets){
+      ReplacementPolicy.fromString(params.cache.replacement, params.cache.ways)
+  }
+  val victimWay = Vec(replacer_array.map(_.way))(set)
 
   val setQuash = bypass_valid && bypass.set === set
   val tagMatch = bypass.data.tag === tag
@@ -169,9 +165,27 @@ class Directory(params: InclusiveCacheParameters) extends Module
     w.tag === tag && w.state =/= INVALID && (!setQuash || UInt(i) =/= bypass.way)
   }.reverse)
   val hit = hits.orR()
+  val hitWay = OHToUInt(hits)
+
+  val wen1 = RegNext(write.fire(), init = false.B)
+  val wen2 = if(params.micro.dirReg) RegNext(wen1, false.B) else wen1
+  val writeWay1 = RegNext(write.bits.way)
+  val writeWay2 = params.dirReg(writeWay1)
+  val writeSet1 = RegNext(write.bits.set)
+  val writeSet2 = params.dirReg(writeSet1)
+
+  for((repl, i) <- replacer_array.zipWithIndex){
+    val setMatch = i.U === Mux(ren2, set, writeSet2)
+    assert(!(ren2 && wen2))
+    val updateWay = Wire(UInt(params.wayBits.W))
+    updateWay := Mux(ren2, hitWay, writeWay2)
+    when(setMatch && ((ren2 && hit) || wen2)){
+      repl.access(updateWay)
+    }
+  }
 
   io.result.valid := ren2
-  io.result.bits := Mux(hit, Mux1H(hits, ways), Mux(setQuash && (tagMatch || wayMatch), bypass.data, Mux1H(victimWayOH, ways)))
+  io.result.bits := Mux(hit, Mux1H(hits, ways), Mux(setQuash && (tagMatch || wayMatch), bypass.data, ways(victimWay)))
   io.result.bits.hit := hit || (setQuash && tagMatch && bypass.data.state =/= INVALID)
   io.result.bits.way := Mux(hit, OHToUInt(hits), Mux(setQuash && tagMatch, bypass.way, victimWay))
 

@@ -72,6 +72,15 @@ class PrefetcherIO(addressBits: Int) extends Bundle
   override def cloneType = (new PrefetcherIO(addressBits)).asInstanceOf[this.type]
 }
 
+class MSHRPerformanceCounters extends Bundle
+{
+  val get     = Bool()
+  val put     = Bool()
+  val hint    = Bool()
+  val acquire = Bool()
+  val miss    = Bool()
+}
+
 // 这些似乎是对外的一些接口
 class ScheduleRequest(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
@@ -189,7 +198,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     val nestedwb  = new NestedWriteback(params).flip
     val mshr_id   = Input(UInt())
     val prefetcherAcquire = Valid(new PrefetcherAcquire(params.inner.bundle.addressBits))
-
+    val mshrPerformanceCounters = Valid(new MSHRPerformanceCounters)
     val issueMeta = Valid(new DirectoryWrite(params)).flip
   }
 
@@ -871,6 +880,14 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.prefetcherAcquire.bits.address       := 0.U
   io.prefetcherAcquire.bits.write         := Bool(false)
   io.prefetcherAcquire.bits.hit           := Bool(false)
+
+  io.mshrPerformanceCounters.valid := Bool(false)
+  io.mshrPerformanceCounters.bits.get := Bool(false)
+  io.mshrPerformanceCounters.bits.put := Bool(false)
+  io.mshrPerformanceCounters.bits.hint := Bool(false)
+  io.mshrPerformanceCounters.bits.acquire := Bool(false)
+  io.mshrPerformanceCounters.bits.miss := Bool(false)
+
   when (io.directory.valid || (io.allocate.valid && io.allocate.bits.repeat)) {
     val dcacheRead = new_request.opcode === TLMessages.AcquireBlock && new_request.param === TLPermissions.NtoB
     val dcacheWrite = (new_request.opcode === TLMessages.AcquireBlock || new_request.opcode === TLMessages.AcquirePerm) && (new_request.param === TLPermissions.NtoT || new_request.param === TLPermissions.BtoT)
@@ -879,6 +896,13 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     io.prefetcherAcquire.bits.address       := params.expandAddress(new_request.tag, new_request.set, UInt(0))
     io.prefetcherAcquire.bits.write         := dcacheWrite
     io.prefetcherAcquire.bits.hit           := new_meta.prefetch_hit
+
+    io.mshrPerformanceCounters.valid := Bool(true)
+    io.mshrPerformanceCounters.bits.get := new_request.opcode === Get
+    io.mshrPerformanceCounters.bits.put := (new_request.opcode === PutFullData) || (new_request.opcode === PutPartialData)
+    io.mshrPerformanceCounters.bits.hint := new_request.opcode === Hint
+    io.mshrPerformanceCounters.bits.acquire := (new_request.opcode === AcquireBlock) || (new_request.opcode === AcquirePerm)
+    io.mshrPerformanceCounters.bits.miss := !new_meta.hit
 
     meta_valid := Bool(true)
     meta := new_meta

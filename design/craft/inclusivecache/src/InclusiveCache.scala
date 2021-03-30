@@ -28,6 +28,13 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.subsystem.BankedL2Key
 import freechips.rocketchip.util._
 
+class ResetGen() extends Module {
+  val io = IO(new Bundle() {
+    val out = Output(Bool())
+  })
+  io.out := RegNext(reset.asBool)
+}
+
 class InclusiveCache(
   val cache: CacheParameters,
   val micro: InclusiveCacheMicroParameters,
@@ -187,7 +194,7 @@ class InclusiveCache(
     }
 
     // Create the L2 Banks
-    val mods = (node.in zip node.out) map { case ((in, edgeIn), (out, edgeOut)) =>
+    val mods = (node.in zip node.out).zipWithIndex.map { case (((in, edgeIn), (out, edgeOut)), i) =>
       edgeOut.manager.managers.foreach { m =>
         require (m.supportsAcquireB.contains(xfer),
           s"All managers behind the L2 must support acquireB($xfer) " +
@@ -197,8 +204,12 @@ class InclusiveCache(
           s"but ${m.name} only supports (${m.supportsAcquireT})!")
       }
 
+      val reset_gen = Module(new ResetGen())
+      reset_gen.suggestName(s"reset_${i}")
+
       val params = InclusiveCacheParameters(cache, micro, control.isDefined, edgeIn, edgeOut)
       val scheduler = Module(new Scheduler(params))
+      scheduler.reset := reset_gen.io.out
 
       scheduler.io.in <> in
       out <> scheduler.io.out

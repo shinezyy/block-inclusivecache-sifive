@@ -34,6 +34,7 @@ case class CacheParameters(
   beatBytes:   Int,
   replacement: String = "plru",
   cacheName:   String = "BlockInclusiveCache",
+  uncachedGet: Boolean = false,
   debug:       Boolean = false,
   enablePerf:  Boolean = false,
   verification: Boolean = false) // inner
@@ -154,6 +155,7 @@ case class InclusiveCacheParameters(
   }
 
   def cacheName  = cache.cacheName
+  def uncachedGet = cache.uncachedGet
   def debug      = cache.debug
   def enablePerf = cache.enablePerf
   def verification = cache.verification

@@ -723,6 +723,11 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   sourceC.io.evict_safe := sourceD.io.evict_safe
   sinkD  .io.grant_safe := sourceD.io.grant_safe
 
+  val setConflict = requests.io.push.fire()
+  val mshrUseBypass = mshr_selectOH_issue.orR() && bypass
+  XSPerfAccumulate(params, "nSetConflict", setConflict)
+  XSPerfAccumulate(params, "nMSHRBypass", mshrUseBypass)
+
   private def afmt(x: AddressSet) = s"""{"base":${x.base},"mask":${x.mask}}"""
   private def addresses = params.inner.manager.managers.flatMap(_.address).map(afmt _).mkString(",")
   private def setBits = params.addressMapping.drop(params.offsetBits).take(params.setBits).mkString(",")

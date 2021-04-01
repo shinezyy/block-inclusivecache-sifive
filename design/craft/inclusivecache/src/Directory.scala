@@ -184,8 +184,17 @@ class Directory(params: InclusiveCacheParameters) extends Module
     }
   }
 
+  val write_deq_forward = write.valid && write.bits.set === set && write.bits.data.tag === tag
+
   io.result.valid := ren2
-  io.result.bits := Mux(hit, Mux1H(hits, ways), Mux(setQuash && (tagMatch || wayMatch), bypass.data, ways(victimWay)))
+  io.result.bits := Mux(hit,
+    Mux(setQuash && tagMatch,
+      bypass.data,
+      Mux(write_deq_forward,
+        write.bits.data,
+        Mux1H(hits, ways))),
+    //Mux1H(hits, ways),
+    Mux(setQuash && (tagMatch || wayMatch), bypass.data, ways(victimWay)))
   io.result.bits.hit := hit || (setQuash && tagMatch && bypass.data.state =/= INVALID)
   io.result.bits.way := Mux(hit, OHToUInt(hits), Mux(setQuash && tagMatch, bypass.way, victimWay))
 

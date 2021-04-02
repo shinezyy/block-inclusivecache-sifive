@@ -29,20 +29,12 @@ class SinkCResponse(params: InclusiveCacheParameters) extends InclusiveCacheBund
   val source = UInt(width = params.inner.bundle.sourceBits)
   val param  = UInt(width = 3)
   val data   = Bool()
-  def dump() = {
-    DebugPrint(params, "SinkCResponse: set: %x tag: %x source: %x param: %x data: %b last: %b\n",
-      set, tag, source, param, data, last)
-  }
 }
 
 class PutBufferCEntry(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
   val data = UInt(width = params.inner.bundle.dataBits)
   val corrupt = Bool()
-  def dump() = {
-    DebugPrint(params, "PutBufferCEntry: data: %x corrupt: %b\n",
-      data, corrupt)
-  }
 }
 
 class SinkC(params: InclusiveCacheParameters) extends Module with HasTLDump

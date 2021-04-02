@@ -35,17 +35,9 @@ class QueuedRequest(params: InclusiveCacheParameters) extends InclusiveCacheBund
 class FullRequest(params: InclusiveCacheParameters) extends QueuedRequest(params)
 {
   val set = UInt(width = params.setBits)
-  def dump() = {
-    DebugPrint(params, "FullRequest: addr %x prio: %x control: %b opcode: %x param: %x size: %x source: %x tag: %x set: %x offset: %x put: %x\n",
-      (tag << (params.setBits + params.offsetBits) | set << (params.offsetBits)), prio.asUInt, control, opcode, param, size, source, tag, set, offset, put)
-  }
 }
 
 class AllocateRequest(params: InclusiveCacheParameters) extends FullRequest(params)
 {
   val repeat = Bool() // set is the same
-  override def dump() = {
-    DebugPrint(params, "AllocateRequest: addr %x prio: %x control: %b opcode: %x param: %x size: %x source: %x tag: %x set: %x offset: %x put: %x repeat: %b\n",
-      (tag << (params.setBits + params.offsetBits) | set << (params.offsetBits)), prio.asUInt, control, opcode, param, size, source, tag, set, offset, put, repeat)
-  }
 }

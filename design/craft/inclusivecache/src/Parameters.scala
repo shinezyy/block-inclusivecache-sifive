@@ -24,7 +24,8 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import freechips.rocketchip.util.property.cover
-import scala.math.{min,max}
+
+import scala.math.{max, min}
 
 case class CacheParameters(
   level:       Int,
@@ -310,3 +311,9 @@ object InclusiveCacheParameters
 }
 
 class InclusiveCacheBundle(params: InclusiveCacheParameters) extends GenericParameterizedBundle(params)
+with HasJsonDump
+{
+  def dump(): Unit = dump(params)
+
+  def dump(prefix_fmt: String, prefix_fields: Data*): Unit = dump(params, prefix_fmt, prefix_fields:_*)
+}

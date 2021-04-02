@@ -23,9 +23,6 @@ import freechips.rocketchip.tilelink._
 class SinkEResponse(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
   val sink = UInt(width = params.inner.bundle.sinkBits)
-  def dump() = {
-    DebugPrint(params, "SinkEResponse: sink: %x\n", sink)
-  }
 }
 
 class SinkE(params: InclusiveCacheParameters) extends Module with HasTLDump

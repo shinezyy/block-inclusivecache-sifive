@@ -26,20 +26,12 @@ class PutBufferAEntry(params: InclusiveCacheParameters) extends InclusiveCacheBu
   val data = UInt(width = params.inner.bundle.dataBits)
   val mask = UInt(width = params.inner.bundle.dataBits/8)
   val corrupt = Bool()
-  def dump() = {
-    DebugPrint(params, "PutBufferAEntry: data: %x mask: %x corrupt: %b\n",
-      data, mask, corrupt)
-  }
 }
 
 class PutBufferPop(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
   val index = UInt(width = params.putBits)
   val last = Bool()
-  def dump() = {
-    DebugPrint(params, "PutBufferAEntry: index: %x last: %b\n",
-      index, last)
-  }
 }
 
 class SinkA(params: InclusiveCacheParameters) extends Module with HasTLDump

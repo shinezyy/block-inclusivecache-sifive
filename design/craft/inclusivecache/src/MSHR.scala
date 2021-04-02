@@ -27,6 +27,8 @@ import MetaData._
 import chisel3.MultiIOModule
 import chisel3.internal.naming.chiselName
 
+import xiangshan.macros.DebugMacros._
+
 @chiselName
 class DummyMux[T <: Data](gen: T) extends Module
 {
@@ -93,7 +95,7 @@ class ScheduleRequest(params: InclusiveCacheParameters) extends InclusiveCacheBu
   val dir = Valid(new DirectoryWrite(params))
   val reload = Bool() // get next request via allocate (if any)
 
-  def dump() = {
+  override def dump() = {
     when (a.fire()) {
       a.bits.dump()
     }
@@ -131,11 +133,6 @@ class MSHRStatus(params: InclusiveCacheParameters) extends InclusiveCacheBundle(
   val nestB  = Bool()
   val blockC = Bool()
   val nestC  = Bool()
-
-  def dump() = {
-    DebugPrint(params, "MSHRStatus: set: %x tag: %x way: %x blockB: %b nestB: %b blockC: %b nestC: %b\n",
-      set, tag, way, blockB, nestB, blockC, nestC)
-  }
 }
 
 class NestedWriteback(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
@@ -146,10 +143,6 @@ class NestedWriteback(params: InclusiveCacheParameters) extends InclusiveCacheBu
   val b_toB       = Bool() // nested Probes may demote us
   val b_clr_dirty = Bool() // nested Probes clear dirty
   val c_set_dirty = Bool() // nested Releases MAY set dirty
-  def dump() = {
-    DebugPrint(params, "NestedWriteback: set: %x tag: %x b_toN: %b b_toB: %b b_clr_dirty: %b c_set_dirty: %b\n",
-      set, tag, b_toN, b_toB, b_clr_dirty, c_set_dirty)
-  }
 }
 
 sealed trait CacheState
@@ -201,39 +194,37 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     val mshrPerformanceCounters = Valid(new MSHRPerformanceCounters)
   }
 
-  when (io.allocate.valid) {
-    DebugPrint(params, "MSHR %d: allocate: ", io.mshr_id)
-    io.allocate.bits.dump()
-  }
 
-  when (io.directory.valid) {
-    DebugPrint(params, "MSHR %d: directory: ", io.mshr_id)
-    io.directory.bits.dump()
-  }
+  val debugContext = new {
+    def dump(name: String, bits: InclusiveCacheBundle): Unit = {
+      bits.dump(s""""mshr": %d, "${name}": """, io.mshr_id)
+    }
 
-  when (io.status.valid) {
-    DebugPrint(params, "MSHR %d: status: ", io.mshr_id)
-    io.status.bits.dump()
+    def dump[T <: Data](args: Seq[(String, T)]): Unit = {
+      import chisel3.Printable
+      val names = args.map(_._1)
+      val fmt = """{ "mshr": %d, """ + names.map(name => s""""$name": "0x%x"""").mkString(", ") + " }\n"
+      val data = List(io.mshr_id.asInstanceOf[Data]) ++ args.map(_._2.asInstanceOf[Data])
+      DebugPrint(params, Printable.pack(fmt, data:_*))
+    }
   }
 
   when (io.schedule.fire()) {
-    DebugPrint(params, "MSHR %d: schedule: ", io.mshr_id)
-    io.schedule.bits.dump()
+    debugContext.dump("schedule", io.schedule.bits)
   }
 
-  when (io.sinkc.valid) {
-    DebugPrint(params, "MSHR %d: sinkc: ", io.mshr_id)
-    io.sinkc.bits.dump()
-  }
 
-  when (io.sinkd.valid) {
-    DebugPrint(params, "MSHR %d: sinkd: ", io.mshr_id)
-    io.sinkd.bits.dump()
-  }
-
-  when (io.sinke.valid) {
-    DebugPrint(params, "MSHR %d: sinke: ", io.mshr_id)
-    io.sinke.bits.dump()
+  List(
+    "allocate" -> io.allocate,
+    "directory" -> io.directory,
+    "status" -> io.status,
+    "sinkc" -> io.sinkc,
+    "sinkd" -> io.sinkd,
+    "sinke" -> io.sinke
+  ) foreach { case (name, port) =>
+    when (port.valid) {
+      debugContext.dump(name, port.bits)
+    }
   }
 
   val request_valid = RegInit(Bool(false))
@@ -304,36 +295,23 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   val s_writeback      = RegInit(Bool(true)) // W  w_*
 
   when (request_valid) {
-    DebugPrint(params, "MSHR %d: s_rprobe: %b w_rprobeackfirst: %b w_rprobeacklast: %b\n",
-      io.mshr_id, s_rprobe, w_rprobeackfirst, w_rprobeacklast)
+    debugContext.dump("request", request)
 
-    DebugPrint(params, "MSHR %d: request: ", io.mshr_id)
-    request.dump
-
-    DebugPrint(params, "MSHR %d: s_release: %b w_releaseack: %b\n",
-      io.mshr_id, s_release, w_releaseack)
-
-    DebugPrint(params, "MSHR %d: s_pprobe: %b w_pprobeackfirst: %b w_pprobeacklast: %b w_pprobeack: %b s_probeack: %b\n",
-      io.mshr_id, s_pprobe, w_pprobeackfirst, w_pprobeacklast, w_pprobeack, s_probeack)
-
-    DebugPrint(params, "MSHR %d: s_acquire: %b w_grant: %b w_grantfirst: %b w_grantlast: %b s_grantack: %b\n",
-      io.mshr_id, s_acquire, w_grant, w_grantfirst, w_grantlast, s_grantack)
-
-    DebugPrint(params, "MSHR %d: s_flush: %b s_execute: %b s_writeback: %b\n",
-      io.mshr_id, s_flush, s_execute, s_writeback)
-
-    DebugPrint(params, "MSHR %d: w_grantack: %b\n",
-      io.mshr_id, w_grantack)
+    debugContext.dump(litArg(
+      s_rprobe, w_rprobeackfirst, w_rprobeacklast,
+      s_release, w_releaseack,
+      s_pprobe, w_pprobeackfirst, w_pprobeacklast, w_pprobeack, s_probeack,
+      s_acquire, w_grant, w_grantfirst, w_grantlast, s_grantack,
+      s_flush, s_execute, s_writeback,
+      w_grantack))
 
     when (request.prio(1)) {
-      DebugPrint(params, "MSHR %d: outer_probe_toT: %b outer_probe_toB: %b outer_probe_toN: %b outer_probe_cap_permission: %b outer_probe_shrink_permission: %b\n",
-        io.mshr_id, outer_probe_toT, outer_probe_toB, outer_probe_toN, outer_probe_cap_permission, outer_probe_shrink_permission)
+      debugContext.dump(litArg(outer_probe_toT, outer_probe_toB, outer_probe_toN, outer_probe_cap_permission, outer_probe_shrink_permission))
     }
   }
 
   when (meta_valid) {
-    DebugPrint(params, "MSHR %d: meta: ", io.mshr_id)
-    meta.dump
+    debugContext.dump("meta", meta)
   }
 
   // [1]: We cannot issue outer Acquire while holding blockB (=> outA can stall)
@@ -431,8 +409,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   // Resulting meta-data
   val final_meta_writeback = Wire(init = meta)
   when (request_valid) {
-    DebugPrint(params, "MSHR %d: final_meta_writeback: ", io.mshr_id)
-    final_meta_writeback.dump
+    debugContext.dump("final_meta_writeback", final_meta_writeback)
   }
 
   val req_clientBit = params.clientBit(request.source)

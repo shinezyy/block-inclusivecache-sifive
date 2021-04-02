@@ -23,9 +23,6 @@ import freechips.rocketchip.tilelink._
 class SinkXRequest(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
   val address = UInt(width = params.inner.bundle.addressBits)
-  def dump() = {
-    DebugPrint(params, "SinkXRequest: address: %x\n", address)
-  }
 }
 
 class SinkX(params: InclusiveCacheParameters) extends Module

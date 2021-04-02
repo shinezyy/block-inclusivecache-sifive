@@ -102,19 +102,12 @@ class SourceDRequest(params: InclusiveCacheParameters) extends FullRequest(param
   val way  = UInt(width = params.wayBits)
   val bad  = Bool()
   val uncached_get = Bool()
-  override def dump() = {
-    DebugPrint(params, "SourceDRequest: prio: %x control: %b opcode: %x param: %x size: %x source: %x tag: %x set: %x offset: %x put: %x sink: %x way: %x bad: %b uncached_get: %b\n",
-      prio.asUInt, control, opcode, param, size, source, tag, set, offset, put, sink, way, bad, uncached_get)
-  }
 }
 
 class SourceDHazard(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
   val set = UInt(width = params.setBits)
   val way = UInt(width = params.wayBits)
-  def dump() = {
-    DebugPrint(params, "SourceDHazard: set: %x way: %x\n", set, way)
-  }
 }
 
 class PutBufferACEntry(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
@@ -122,9 +115,6 @@ class PutBufferACEntry(params: InclusiveCacheParameters) extends InclusiveCacheB
   val data = UInt(width = params.inner.bundle.dataBits)
   val mask = UInt(width = params.inner.bundle.dataBits/8)
   val corrupt = Bool()
-  def dump() = {
-    DebugPrint(params, "PutBufferACEntry: data: %x mask: %x corrupt: %b\n", data, mask, corrupt)
-  }
 }
 
 class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump

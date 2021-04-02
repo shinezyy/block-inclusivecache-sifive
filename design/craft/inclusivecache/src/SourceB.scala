@@ -27,10 +27,6 @@ class SourceBRequest(params: InclusiveCacheParameters) extends InclusiveCacheBun
   val tag     = UInt(width = params.tagBits)
   val set     = UInt(width = params.setBits)
   val clients = UInt(width = params.clientBits)
-  def dump() = {
-    DebugPrint(params, "SourceBRequest: param: %x tag: %x set: %x clients: %x addr %x\n",
-      param, tag, set, clients, (tag << (params.setBits + params.offsetBits) | set << (params.offsetBits)))
-  }
 }
 
 class SourceB(params: InclusiveCacheParameters) extends Module with HasTLDump

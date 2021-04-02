@@ -27,10 +27,6 @@ class SourceARequest(params: InclusiveCacheParameters) extends InclusiveCacheBun
   val param  = UInt(width = 3)
   val source = UInt(width = params.outer.bundle.sourceBits)
   val opcode = UInt(width = 3)
-  def dump() = {
-    DebugPrint(params, "SourceARequest: opcode: %d tag: %x set: %x param: %x source: %x\n",
-      opcode, tag, set, param, source)
-  }
 }
 
 class SourceA(params: InclusiveCacheParameters) extends Module with HasTLDump

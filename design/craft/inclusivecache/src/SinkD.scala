@@ -26,10 +26,6 @@ class GrantBufferDEntry(params: InclusiveCacheParameters) extends InclusiveCache
 {
   val data = UInt(width = params.inner.bundle.dataBits)
   val param = UInt(width = 3)
-  def dump() = {
-    DebugPrint(params, "GrantBufferDEntry: data: %x param: %x\n",
-      data, param)
-  }
 }
 
 // Instead of using ListBuffer just as putBuffer and releaseBuffer does,
@@ -40,9 +36,6 @@ class GrantBufferDEntry(params: InclusiveCacheParameters) extends InclusiveCache
 class GrantBufferAllocate(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
   val index = UInt(width = params.putBits)
-  def dump() = {
-    DebugPrint(params, "GrantBufferAllocate: index: %d\n", index)
-  }
 }
 
 class GrantBufferPush(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
@@ -52,10 +45,6 @@ class GrantBufferPush(params: InclusiveCacheParameters) extends InclusiveCacheBu
   val beat = UInt(width = log2Up(nBeats))
   val data = UInt(width = params.inner.bundle.dataBits)
   val param = UInt(width = 3)
-  def dump() = {
-    DebugPrint(params, "GrantBufferPush: index: %d beat: %d data: %x param: %x\n",
-      index, beat, data, param)
-  }
 }
 
 class GrantBufferPop(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
@@ -65,10 +54,6 @@ class GrantBufferPop(params: InclusiveCacheParameters) extends InclusiveCacheBun
   val index = UInt(width = params.putBits)
   val beat = UInt(width = log2Up(nBeats))
   val last = Bool()
-  def dump() = {
-    DebugPrint(params, "GrantBufferPop: index: %d beat: %d last: %b\n",
-      index, beat, last)
-  }
 }
 
 class GrantBuffer(params: InclusiveCacheParameters) extends Module
@@ -147,10 +132,6 @@ class SinkDResponse(params: InclusiveCacheParameters) extends InclusiveCacheBund
   val sink   = UInt(width = params.outer.bundle.sinkBits)
   val denied = Bool()
   val grant  = UInt(width = params.putBits)
-  def dump() = {
-    DebugPrint(params, "SinkDResponse: last: %b opcode: %x param: %x source: %x sink: %x denied: %b grant: %d\n",
-      last, opcode, param, source, sink, denied, grant)
-  }
 }
 
 class SinkD(params: InclusiveCacheParameters) extends Module with HasTLDump

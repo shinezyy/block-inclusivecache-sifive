@@ -673,7 +673,8 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   when ((!s_writeback && no_wait) && io.schedule.ready) {
     transition(S_INVALID,  S_BRANCH,   b && m) // only MMIO can bring us to BRANCH state
     transition(S_INVALID,  S_BRANCH_C, b && c) // C state is only possible if there are inner caches
-    transition(S_INVALID,  S_TIP,      m)      // MMIO read
+    // since we can config l3 to cache get, S_INVALID may become S_TIP
+    // transition(S_INVALID,  S_TIP,      m)      // MMIO read
     transition(S_INVALID,  S_TIP_C,    false)  // we would go S_TRUNK_C instead
     transition(S_INVALID,  S_TIP_CD,   false)  // acquire does not cause dirty immediately
     transition(S_INVALID,  S_TIP_D,    m)      // MMIO write

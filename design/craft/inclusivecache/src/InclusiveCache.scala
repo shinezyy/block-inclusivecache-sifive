@@ -18,6 +18,7 @@
 package sifive.blocks.inclusivecache
 
 import Chisel._
+import chisel3.WireInit
 import diplomaticobjectmodel.model.OMCacheMaster
 import freechips.rocketchip.config._
 import freechips.rocketchip.diplomacy._
@@ -28,17 +29,25 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.subsystem.BankedL2Key
 import freechips.rocketchip.util._
 
-class ResetGen() extends Module {
+class ResetGen(val fpga: Boolean, val level: Int = 1) extends Module {
   val io = IO(new Bundle() {
     val out = Output(Bool())
   })
-  io.out := RegNext(reset.asBool)
+  var reset_out = WireInit(reset.asBool)
+  if (fpga) {
+    for (i <- 0 until level) {
+      reset_out = RegNext(reset_out)
+    }
+  }
+
+  io.out := reset_out
 }
 
 class InclusiveCache(
   val cache: CacheParameters,
   val micro: InclusiveCacheMicroParameters,
-  control: Option[InclusiveCacheControlParameters] = None
+  control: Option[InclusiveCacheControlParameters] = None,
+  val fpga: Boolean = false
   )(implicit p: Parameters)
     extends LazyModule
 {
@@ -204,7 +213,7 @@ class InclusiveCache(
           s"but ${m.name} only supports (${m.supportsAcquireT})!")
       }
 
-      val reset_gen = Module(new ResetGen())
+      val reset_gen = Module(new ResetGen(fpga))
       reset_gen.suggestName(s"reset_${i}")
 
       val params = InclusiveCacheParameters(cache, micro, control.isDefined, edgeIn, edgeOut)

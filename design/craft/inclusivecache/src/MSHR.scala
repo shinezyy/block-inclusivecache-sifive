@@ -693,7 +693,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     transition(S_BRANCH_C, S_INVALID,  b && c && p)
     transition(S_BRANCH_C, S_BRANCH,   b && c)      // clean release (optional)
     transition(S_BRANCH_C, S_TIP,      b && c && m) // prefetch write
-    transition(S_BRANCH_C, S_TIP_C,    false)       // we would go S_TRUNK_C instead
+    // transition(S_BRANCH_C, S_TIP_C,    false)       // we would go S_TRUNK_C instead
     transition(S_BRANCH_C, S_TIP_D,    b && c && m) // MMIO write
     transition(S_BRANCH_C, S_TIP_CD,   false)       // going dirty means we must shoot down clients
     transition(S_BRANCH_C, S_TRUNK_C,  b && c)      // acquire

@@ -31,7 +31,12 @@ case class CacheParameters(
   ways:        Int,
   sets:        Int,
   blockBytes:  Int,
-  beatBytes:   Int) // inner
+  beatBytes:   Int,
+  cacheName:   String = "BlockInclusiveCache",
+  uncachedGet: Boolean = false,
+  debug:       Boolean = false,
+  enablePerf:  Boolean = false,
+  verification: Boolean = false) // inner
 {
   require (ways > 0)
   require (sets > 0)

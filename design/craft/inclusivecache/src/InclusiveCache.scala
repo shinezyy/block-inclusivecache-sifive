@@ -31,7 +31,8 @@ import freechips.rocketchip.util._
 class InclusiveCache(
   val cache: CacheParameters,
   val micro: InclusiveCacheMicroParameters,
-  control: Option[InclusiveCacheControlParameters] = None
+  control: Option[InclusiveCacheControlParameters] = None,
+  val fpga: Boolean = false
   )(implicit p: Parameters)
     extends LazyModule
 {

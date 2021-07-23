@@ -70,7 +70,7 @@ class DirectoryResult(params: InclusiveCacheParameters) extends DirectoryEntry(p
   }
 }
 
-class Directory(params: InclusiveCacheParameters) extends Module
+class Directory(params: InclusiveCacheParameters, bank_id: Int) extends Module
 {
   val io = new Bundle {
     val write  = Decoupled(new DirectoryWrite(params)).flip
@@ -101,8 +101,13 @@ class Directory(params: InclusiveCacheParameters) extends Module
   val codeBits = new DirectoryEntry(params).getWidth
 
   val singlePort = true
+  println(s"client counts: ${params.clientBits}, tagBit: ${params.tagBits}, codeBits: ${codeBits}")
   val cc_dir = Module(new SRAMTemplate(UInt(width = codeBits), set=params.cache.sets, way=params.cache.ways,
-    shouldReset=false, holdRead=false, singlePort=singlePort))
+    shouldReset=false, holdRead=false, singlePort=singlePort,
+    initiate=true, modulePrefix=s"l${params.cache.level}_tag",
+    bankID=bank_id, organization="wayway_se-nk"))
+
+  doNotDedup(cc_dir)
 
   val write = Queue(io.write, 1) // must inspect contents => max size 1
   // a flow Q creates a WaR hazard... this MIGHT not cause a problem

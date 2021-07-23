@@ -62,7 +62,7 @@ class BankedStoreOuterPoison(params: InclusiveCacheParameters) extends BankedSto
 class BankedStoreInnerDecoded(params: InclusiveCacheParameters) extends BankedStoreInnerData(params)
 class BankedStoreOuterDecoded(params: InclusiveCacheParameters) extends BankedStoreOuterData(params)
 
-class BankedStore(params: InclusiveCacheParameters) extends Module
+class BankedStore(params: InclusiveCacheParameters, bank_low_id: Int, bank_low_bits: Int) extends Module
 {
   val io = new Bundle {
     val sinkC_adr = Decoupled(new BankedStoreInnerAddress(params)).flip
@@ -84,13 +84,20 @@ class BankedStore(params: InclusiveCacheParameters) extends Module
   val rowEntries = params.cache.sizeBytes / rowBytes
   val rowBits = log2Ceil(rowEntries)
   val numBanks = rowBytes / params.micro.writeBytes
-  val codeBits = 8*params.micro.writeBytes
+  val codeBits = 8*params.micro.writeBytes  // typically 8 bytes
 
   val singlePort = true
+  println(s"$numBanks banks")
   val cc_banks = Seq.tabulate(numBanks) {
     i =>
-      Module(new SRAMTemplate(UInt(width = codeBits), set=rowEntries, way=1,
-        shouldReset=false, holdRead=false, singlePort=singlePort))
+      Module(new SRAMTemplate1(UInt(width = codeBits), set=rowEntries, way=1,
+        shouldReset=false, holdRead=false, singlePort=singlePort,
+        initiate=true, modulePrefix=s"l${params.cache.level}_data",
+        bankID=i << bank_low_bits | bank_low_id, organization="wayway_se-nk"))
+  }
+
+  cc_banks.foreach {
+    case bank => doNotDedup(bank)
   }
 
   // These constraints apply on the port priorities:

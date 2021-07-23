@@ -98,7 +98,7 @@ class ScheduleCut(params: InclusiveCacheParameters) extends Module {
   io.s_issue := s_issue
 }
 
-class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
+class Scheduler(params: InclusiveCacheParameters, sched_id: Int, bank_bits: Int) extends Module with HasTLDump
 {
   val io = new Bundle {
     val in = TLBundle(params.inner.bundle).flip
@@ -191,8 +191,8 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
 
   // io.out.b.ready := Bool(true) // disconnected
 
-  val directory = Module(new Directory(params))
-  val bankedStore = Module(new BankedStore(params))
+  val directory = Module(new Directory(params, sched_id))
+  val bankedStore = Module(new BankedStore(params, sched_id, bank_bits))
   // 我感觉这个就是用来放secondary请求的？就是说有请求就从总线上拿下来放这里？
   // 它这儿的queue的数量是3 * mshrs，这个是有啥讲究吗？
   // secondary比mshr要多？

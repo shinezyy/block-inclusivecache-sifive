@@ -203,7 +203,9 @@ class InclusiveCache(
     }
 
     // Create the L2 Banks
+    println(s"L${cache.level} cache")
     val mods = (node.in zip node.out).zipWithIndex.map { case (((in, edgeIn), (out, edgeOut)), i) =>
+      println(s"Creating mods $i")
       edgeOut.manager.managers.foreach { m =>
         require (m.supportsAcquireB.contains(xfer),
           s"All managers behind the L2 must support acquireB($xfer) " +
@@ -217,7 +219,7 @@ class InclusiveCache(
       reset_gen.suggestName(s"reset_${i}")
 
       val params = InclusiveCacheParameters(cache, micro, control.isDefined, edgeIn, edgeOut)
-      val scheduler = Module(new Scheduler(params))
+      val scheduler = Module(new Scheduler(params, i, log2Ceil(node.in.size)))
       scheduler.reset := reset_gen.io.out
 
       scheduler.io.in <> in

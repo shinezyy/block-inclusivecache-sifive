@@ -150,7 +150,7 @@ class ListBufferLite[T <: Data](params: ListBufferParameters[T]) extends Module
     valid_set := UIntToOH(io.push.bits.index, params.queues)
     // 数据局写入
     //data.write(io.push_onehot_index, io.push.bits.data)
-    (data zip io.push_onehot_index.toBools()) foreach { case (element, enable) =>
+    (data zip io.push_onehot_index.asBools) foreach { case (element, enable) =>
       when (enable) {
         element := io.push.bits.data
       }
@@ -161,7 +161,7 @@ class ListBufferLite[T <: Data](params: ListBufferParameters[T]) extends Module
 
   // Bypass push data to the peek port
   //io.data := data.read(io.pop_onehot_index)
-  io.data := Mux1H(io.pop_onehot_index.toBools(), data)
+  io.data := Mux1H(io.pop_onehot_index.asBools, data)
   io.valid := valid
 
   // It is an error to pop something that is not valid

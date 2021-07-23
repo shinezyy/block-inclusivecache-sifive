@@ -23,6 +23,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 
 import scala.math.{max, min}
+import chisel3.experimental.doNotDedup
 
 abstract class BankedStoreAddress(val inner: Boolean, params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {

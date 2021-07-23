@@ -23,6 +23,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.ReplacementPolicy
 import MetaData._
+import chisel3.experimental.doNotDedup
 
 class DirectoryEntry(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {

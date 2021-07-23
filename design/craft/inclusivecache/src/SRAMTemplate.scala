@@ -111,6 +111,7 @@ class SRAMTemplateWithArbiter[T <: Data](nRead: Int, gen: T, set: Int, way: Int 
   })
 
   val ram = Module(new SRAMTemplate(gen, set, way, shouldReset, holdRead = false, singlePort = true))
+  doNotDedup(ram)
   ram.io.w <> io.w
 
   val readArb = Module(new Arbiter(chiselTypeOf(io.r(0).req.bits), nRead))

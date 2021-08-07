@@ -19,6 +19,7 @@ package sifive.blocks.inclusivecache
 
 import Chisel._
 import chisel3.WireInit
+import chisel3.util.experimental.BoringUtils
 import diplomaticobjectmodel.model.OMCacheMaster
 import freechips.rocketchip.config._
 import freechips.rocketchip.diplomacy._
@@ -252,6 +253,10 @@ class InclusiveCache(
       require(mods.length == 1)
     }
     io <> mods(0).io.prefetcher
+    if (cache.level == 3) {
+      val l3miss = mods.map(mod => mod.io.l3miss).reduce(_||_)
+      BoringUtils.addSource(l3miss, "TMA_l3miss")
+    }
 
     def json = s"""{"banks":[${mods.map(_.json).mkString(",")}]"""
   }

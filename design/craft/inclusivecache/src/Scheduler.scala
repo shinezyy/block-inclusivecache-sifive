@@ -18,6 +18,7 @@
 package sifive.blocks.inclusivecache
 
 import Chisel._
+import chisel3.util.experimental.BoringUtils
 import freechips.rocketchip.diplomacy.AddressSet
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
@@ -110,6 +111,7 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
     val req = Decoupled(new SinkXRequest(params)).flip
     val resp = Decoupled(new SourceXRequest(params))
     val prefetcher = new PrefetcherIO(params.inner.bundle.addressBits)
+    val l3miss = Output(Bool())
   }
 
   val sourceA = Module(new SourceA(params))
@@ -198,6 +200,15 @@ class Scheduler(params: InclusiveCacheParameters) extends Module with HasTLDump
   // secondary比mshr要多？
   val requests = Module(new ListBufferLite(ListBufferParameters(new QueuedRequest(params), 3*params.mshrs, params.secondary, false)))
   val mshrs = Seq.fill(params.mshrs) { Module(new MSHR(params)) }
+
+  val missVec = mshrs.map(mshr => mshr.io.perf.handle_miss)
+  val getVec  = mshrs.map(mshr => mshr.io.perf.handle_miss && mshr.io.perf.handle_get)
+  if (!params.lastLevel) {
+    BoringUtils.addSource(missVec.reduce(_ || _), "TMA_l2miss")
+    BoringUtils.addSource(getVec.reduce(_ || _), "TMA_l2handleget")
+  }
+  io.l3miss := missVec.reduce(_ || _)
+
   // 这是是个啥鬼东西啊？
   // init是得到列表中除了最后一项以外的其他所有项
   // abc mshrs是除了倒数两项之外的所有项

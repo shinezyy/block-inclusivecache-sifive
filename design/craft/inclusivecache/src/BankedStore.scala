@@ -36,6 +36,10 @@ abstract class BankedStoreAddress(val inner: Boolean, params: InclusiveCachePara
     DebugPrint(params, "BankedStoreAddress: noop: %b way: %x set: %x beat: %x mask: %x\n",
       noop, way, set, beat, mask)
   }
+  def dumpx(): Unit = {
+    printf("BankedStoreAddress: noop: %b way: %x set: %x beat: %x mask: %x\n",
+      noop, way, set, beat, mask)
+  }
 }
 
 trait BankedStoreRW
@@ -86,14 +90,18 @@ class BankedStore(params: InclusiveCacheParameters, bank_low_id: Int, bank_low_b
   val numBanks = rowBytes / params.micro.writeBytes
   val codeBits = 8*params.micro.writeBytes  // typically 8 bytes
 
+  println(s"InnerBytes: $innerBytes, outerBytes: $outerBytes")
+  println(s"writeBytes: ${params.micro.writeBytes}")
+  println(s"rowBytes: $rowBytes, rowEntries: $rowEntries, numBanks: $numBanks")
+
   val singlePort = true
   println(s"$numBanks banks")
   val cc_banks = Seq.tabulate(numBanks) {
     i =>
       Module(new SRAMTemplate1(UInt(width = codeBits), set=rowEntries, way=1,
         shouldReset=false, holdRead=false, singlePort=singlePort,
-        initiate=true, modulePrefix=s"l${params.cache.level}_data",
-        bankID=i << bank_low_bits | bank_low_id, organization="wayway_se-nk"))
+        initiate=true, modulePrefix=s"l${params.cache.level}_cache_data",
+        bankID= i <<bank_low_bits | bank_low_id, organization="wayway_Senk", blockID = 0))
   }
 
   cc_banks.foreach {

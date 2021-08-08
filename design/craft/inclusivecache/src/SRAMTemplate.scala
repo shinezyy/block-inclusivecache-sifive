@@ -67,38 +67,23 @@ class SRAMWriteBus[T <: Data](private val gen: T, val set: Int, val way: Int = 1
   }
 }
 
-class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
-  shouldReset: Boolean = false, holdRead: Boolean = false, singlePort: Boolean = false,
-  initiate: Boolean = false, modulePrefix: String = "",
-  bankID: Int = -1, organization: String = ""
-  ) extends Module {
-  val io = IO(new Bundle {
-    val r = Flipped(new SRAMReadBus(gen, set, way))
-    val w = Flipped(new SRAMWriteBus(gen, set, way))
-  })
-
-  val wordType = UInt(gen.getWidth.W)
-  // maybe Vec is not supported by loadMem, TODO: try bundle or simple types
-  val array = SyncReadMem(set, Vec(way, wordType))
-  val (resetState, resetSet) = (WireInit(false.B), WireInit(0.U))
-
-  if (initiate) {
-    assume(modulePrefix.trim.nonEmpty)
-    assume(organization.trim.nonEmpty)
-    val allowed_organizations = List("wayway_se-nk")
-    assume(allowed_organizations contains organization)
-    // val allowed_organizations = List(
+// val allowed_organizations = List(
     //   "wayway_se-nk", "wayway_ba-et",
     //   "wwaayy_se-nk", "wwaayy_ba-et",
     // )
     // other organizations will be supported later
+    // splitway:
+    //      ┌──────────────┐       ┌──────────────┐
+    // way0 │     set0     │  way1 │     set1     │
+    //      ├──────────────┤       ├──────────────┤
+    //      │     set2     │       │     set3     │
+    //      └──────────────┘       └──────────────┘
     // wayway:
     //      ┌──────────────┐
     // way0 │     set0     │
     //      ├──────────────┤
     //      │     set1     │
-    //      └──────────────┘
-    //      ┌──────────────┐
+    //      ├──────────────┤
     // way1 │     set0     │
     //      ├──────────────┤
     //      │     set1     │
@@ -108,8 +93,7 @@ class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
     // set0 │     way0     │
     //      ├──────────────┤
     //      │     way1     │
-    //      └──────────────┘
-    //      ┌──────────────┐
+    //      ├──────────────┤
     // set1 │     way0     │
     //      ├──────────────┤
     //      │     way1     │
@@ -119,8 +103,7 @@ class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
     // bank0│     set0     │
     //      ├──────────────┤
     //      │     set1     │
-    //      └──────────────┘
-    //      ┌──────────────┐
+    //      ├──────────────┤
     // bank1│     set2     │
     //      ├──────────────┤
     //      │     set3     │
@@ -130,18 +113,43 @@ class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
     // bank0│     set0     │
     //      ├──────────────┤
     //      │     set2     │
-    //      └──────────────┘
-    //      ┌──────────────┐
+    //      ├──────────────┤
     // bank1│     set1     │
     //      ├──────────────┤
     //      │     set3     │
     //      └──────────────┘
+
+class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
+  shouldReset: Boolean = false, holdRead: Boolean = false, singlePort: Boolean = false,
+  initiate: Boolean = false, modulePrefix: String = "",
+  bankID: Int = -1, organization: String = "", blockID: Int = 0,
+  ) extends Module {
+  val io = IO(new Bundle {
+    val r = Flipped(new SRAMReadBus(gen, set, way))
+    val w = Flipped(new SRAMWriteBus(gen, set, way))
+  })
+
+  require(way > 1)
+
+  val wordType = UInt(gen.getWidth.W)
+  // maybe Vec is not supported by loadMem, TODO: try bundle or simple types
+  val arrays = Seq.fill(way)(SyncReadMem(set, wordType))
+  val (resetState, resetSet) = (WireInit(false.B), WireInit(0.U))
+
+  if (initiate) {
+    assume(modulePrefix.trim.nonEmpty)
+    assume(organization.trim.nonEmpty)
+    val allowed_organizations = List("splitway_Senk", "wayway_Senk")
+    assume(allowed_organizations contains organization)
     assume(bankID >= 0)
-    val ram_initiator = s"${modulePrefix}_${organization}_bank${bankID}"
-    val init_file = "./" + ram_initiator
-    // loadMemoryFromFileInline(array, init_file)
-    // println(ram_initiator)
-    println(init_file)
+
+    arrays.zipWithIndex.foreach {
+      case(array, i) =>
+        val ram_initiator = s"${modulePrefix}_${organization}_bank${bankID}_way${i}_block${blockID}.txt"
+        val init_file = "./" + ram_initiator
+        loadMemoryFromFileInline(array, init_file)
+        println(init_file)
+    }
   }
 
   if (shouldReset) {
@@ -159,11 +167,24 @@ class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
   val setIdx = Mux(resetState, resetSet, io.w.req.bits.setIdx)
   val wdataword = Mux(resetState, 0.U.asTypeOf(wordType), io.w.req.bits.data.asUInt)
   val waymask = Mux(resetState, Fill(way, "b1".U), io.w.req.bits.waymask.getOrElse("b1".U))
-  val wdata = VecInit(Seq.fill(way)(wdataword))
-  when (wen) { array.write(setIdx, wdata, waymask.asBools) }
+  // val wdata = VecInit(Seq.fill(way)(wdataword))
+  arrays.zipWithIndex.foreach {
+    case (array, i) =>
+      when (wen && waymask(i)) {
+        array.write(setIdx, wdataword)
+      }
+  }
 
-  val rdata = (if (holdRead) ReadAndHold(array, io.r.req.bits.setIdx, realRen)
-               else array.read(io.r.req.bits.setIdx, realRen)).map(_.asTypeOf(gen))
+  val rdata = arrays.map {
+    array =>
+      val single_data = 
+      (if (holdRead)
+        ReadAndHold(array, io.r.req.bits.setIdx, realRen)
+      else
+        array.read(io.r.req.bits.setIdx, realRen))
+      single_data
+  }
+
   io.r.resp.data := VecInit(rdata)
 
   io.r.req.ready := !resetState && (if (singlePort) !wen else true.B)
@@ -195,7 +216,7 @@ class SRAMTemplateWithArbiter[T <: Data](nRead: Int, gen: T, set: Int, way: Int 
 class SRAMTemplate1[T <: Data](gen: T, set: Int, way: Int = 1,
   shouldReset: Boolean = false, holdRead: Boolean = false, singlePort: Boolean = false,
   initiate: Boolean = false, modulePrefix: String = "",
-  bankID: Int = -1, organization: String = ""
+  bankID: Int = -1, organization: String = "", blockID: Int = 0,
   ) extends Module {
   val io = IO(new Bundle {
     val r = Flipped(new SRAMReadBus(gen, set, way))
@@ -207,17 +228,15 @@ class SRAMTemplate1[T <: Data](gen: T, set: Int, way: Int = 1,
   if (initiate) {
     assume(modulePrefix.trim.nonEmpty)
     assume(organization.trim.nonEmpty)
-    val allowed_organizations = List("wayway_se-nk")
+    val allowed_organizations = List("wayway_Senk")
     assume(allowed_organizations contains organization)
     assume(bankID >= 0)
   }
   val array = SyncReadMem(set, wordType)
   if (initiate) {
-    loadMemoryFromFileInline(array, s"${modulePrefix}_${organization}_bank${bankID}.txt")
-    val ram_initiator = s"${modulePrefix}_${organization}_bank${bankID}.txt"
+    val ram_initiator = s"${modulePrefix}_${organization}_bank${bankID}_block${blockID}.txt"
     val init_file = "./" + ram_initiator
-    // println(ram_initiator)
-    println("Using 1 way Template")
+    loadMemoryFromFileInline(array, init_file)
     println(init_file)
   }
   val (resetState, resetSet) = (WireInit(false.B), WireInit(0.U))

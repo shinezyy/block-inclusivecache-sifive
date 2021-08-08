@@ -36,6 +36,10 @@ class DirectoryEntry(params: InclusiveCacheParameters) extends InclusiveCacheBun
     DebugPrint(params, "DirectoryEntry: dirty: %b state: %d clients: %x tag: %x\n",
       dirty, state, clients, tag)
   }
+  def dumpx() = {
+    printf("DirectoryEntry: dirty: %b state: %x clients: %x tag: %x\n",
+      dirty, state, clients, tag)
+  }
 }
 
 class DirectoryWrite(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
@@ -104,8 +108,8 @@ class Directory(params: InclusiveCacheParameters, bank_id: Int) extends Module
   println(s"client counts: ${params.clientBits}, tagBit: ${params.tagBits}, codeBits: ${codeBits}")
   val cc_dir = Module(new SRAMTemplate(UInt(width = codeBits), set=params.cache.sets, way=params.cache.ways,
     shouldReset=false, holdRead=false, singlePort=singlePort,
-    initiate=true, modulePrefix=s"l${params.cache.level}_tag",
-    bankID=bank_id, organization="wayway_se-nk"))
+    initiate=true, modulePrefix=s"l${params.cache.level}_cache_tag",
+    bankID=bank_id, organization="splitway_Senk"))
 
   doNotDedup(cc_dir)
 
@@ -115,8 +119,9 @@ class Directory(params: InclusiveCacheParameters, bank_id: Int) extends Module
 
   // Wiping the Directory with 0s on reset has ultimate priority
   val wipeCount = RegInit(UInt(0, width = params.setBits + 1))
-  val wipeOff = RegNext(Bool(false), Bool(true)) // don't wipe tags during reset
-  val wipeDone = wipeCount(params.setBits)
+  val wipeOff = RegNext(Bool(true), Bool(true)) // don't wipe tags during reset
+  // val wipeDone = wipeCount(params.setBits)
+  val wipeDone = true.B
   val wipeSet = wipeCount(params.setBits - 1,0)
 
   io.ready := wipeDone
@@ -172,6 +177,23 @@ class Directory(params: InclusiveCacheParameters, bank_id: Int) extends Module
   }.reverse)
   val hit = hits.orR()
   val hitWay = OHToUInt(hits)
+  when (ren2) {
+    when (!hit) {
+        printf("L%d cache miss @ set %d tag %x\n", params.cache.level.U, set, tag)
+    }
+    ways.foreach {
+      w => 
+        when (w.tag === tag && w.state =/= INVALID) {
+        printf("L%d cache Valid tag match @ set %d tag %x\n", params.cache.level.U, set, tag)
+        printf("0x%x\n", hits)
+        w.dumpx()
+        }
+      when (!hit) {
+        w.dumpx()
+      }
+    }
+  }
+
 
   val wen1 = RegNext(write.fire(), init = false.B)
   val wen2 = if(params.micro.dirReg) RegNext(wen1, false.B) else wen1

@@ -199,6 +199,10 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     val mshr_id   = Input(UInt())
     val prefetcherAcquire = Valid(new PrefetcherAcquire(params.inner.bundle.addressBits))
     val mshrPerformanceCounters = Valid(new MSHRPerformanceCounters)
+    val perf      = new Bundle{
+      val handle_miss = Output(Bool())
+      val handle_get  = Output(Bool())
+    }
   }
 
   when (io.allocate.valid) {
@@ -887,6 +891,9 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.mshrPerformanceCounters.bits.hint := Bool(false)
   io.mshrPerformanceCounters.bits.acquire := Bool(false)
   io.mshrPerformanceCounters.bits.miss := Bool(false)
+
+  io.perf.handle_miss := !meta.hit && s_acquire && !w_grant
+  io.perf.handle_get  := request.opcode === Get
 
   when (io.directory.valid || (io.allocate.valid && io.allocate.bits.repeat)) {
     val dcacheRead = new_request.opcode === TLMessages.AcquireBlock && new_request.param === TLPermissions.NtoB

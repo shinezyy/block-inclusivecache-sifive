@@ -37,7 +37,7 @@ class DirectoryEntry(params: InclusiveCacheParameters) extends InclusiveCacheBun
       dirty, state, clients, tag)
   }
   def dumpx() = {
-    printf("DirectoryEntry: dirty: %b state: %x clients: %x tag: %x\n",
+    DebugPrint(params, "DirectoryEntry: dirty: %b state: %x clients: %x tag: %x\n",
       dirty, state, clients, tag)
   }
 }
@@ -179,13 +179,13 @@ class Directory(params: InclusiveCacheParameters, bank_id: Int) extends Module
   val hitWay = OHToUInt(hits)
   when (ren2) {
     when (!hit) {
-        printf("L%d cache miss @ set %d tag %x\n", params.cache.level.U, set, tag)
+        DebugPrint(params, "L%d cache miss @ set %d tag %x\n", params.cache.level.U, set, tag)
     }
     ways.foreach {
       w => 
         when (w.tag === tag && w.state =/= INVALID) {
-        printf("L%d cache Valid tag match @ set %d tag %x\n", params.cache.level.U, set, tag)
-        printf("0x%x\n", hits)
+        DebugPrint(params, "L%d cache Valid tag match @ set %d tag %x\n", params.cache.level.U, set, tag)
+        DebugPrint(params, "0x%x\n", hits)
         w.dumpx()
         }
       when (!hit) {

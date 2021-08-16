@@ -200,7 +200,6 @@ class SourceD(params: InclusiveCacheParameters) extends Module with HasTLDump
   when (io.bs_radr.fire()) {
     DebugPrint(params, "SourceD bs_radr:")
     io.bs_radr.bits.dump()
-    printf("SourceD bs_radr:")
     io.bs_radr.bits.dumpx()
   }
 

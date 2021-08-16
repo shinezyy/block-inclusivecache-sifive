@@ -37,7 +37,7 @@ abstract class BankedStoreAddress(val inner: Boolean, params: InclusiveCachePara
       noop, way, set, beat, mask)
   }
   def dumpx(): Unit = {
-    printf("BankedStoreAddress: noop: %b way: %x set: %x beat: %x mask: %x\n",
+    DebugPrint(params, "BankedStoreAddress: noop: %b way: %x set: %x beat: %x mask: %x\n",
       noop, way, set, beat, mask)
   }
 }

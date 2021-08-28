@@ -161,7 +161,12 @@ class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
     resetSet := _resetSet
   }
 
-  val (ren, wen) = (io.r.req.valid, io.w.req.valid || resetState)
+  val firstCycle = RegNext(false.B, init=true.B)
+  dontTouch(firstCycle)
+
+  val (ren, wen) = (io.r.req.valid, (io.w.req.valid || resetState) && !reset.asBool)
+  dontTouch(wen)
+
   val realRen = (if (singlePort) ren && !wen else ren)
 
   val setIdx = Mux(resetState, resetSet, io.w.req.bits.setIdx)
@@ -250,7 +255,12 @@ class SRAMTemplate1[T <: Data](gen: T, set: Int, way: Int = 1,
     resetSet := _resetSet
   }
 
-  val (ren, wen) = (io.r.req.valid, io.w.req.valid || resetState)
+  val firstCycle = RegNext(false.B, init=true.B)
+  dontTouch(firstCycle)
+
+  val (ren, wen) = (io.r.req.valid, (io.w.req.valid || resetState) && !reset.asBool)
+  dontTouch(wen)
+
   val realRen = (if (singlePort) ren && !wen else ren)
 
   val setIdx = Mux(resetState, resetSet, io.w.req.bits.setIdx)

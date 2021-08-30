@@ -622,7 +622,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   val p = !params.lastLevel  // can be probed
   val c = !params.firstLevel // can be acquired
   // 这两个看不懂是在干啥?
-  val m = params.inner.client.clients.exists(!_.supportsProbe)   // can be written (or read)
+  val m = params.inner.client.clients.exists(!_.supports.probe)   // can be written (or read)
   val r = params.outer.manager.managers.exists(!_.alwaysGrantsT) // read-only devices exist
   val f = params.control     // flush control register exists
   val cfg = (p, c, m, r, f)

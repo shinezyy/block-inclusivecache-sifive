@@ -205,7 +205,7 @@ class Scheduler(params: InclusiveCacheParameters, sched_id: Int, bank_bits: Int)
   val getVec  = mshrs.map(mshr => mshr.io.perf.handle_miss && mshr.io.perf.handle_get)
   if (!params.lastLevel) {
     BoringUtils.addSource(missVec.reduce(_ || _), "TMA_l2miss")
-    BoringUtils.addSource(getVec.reduce(_ || _), "TMA_l2handleget")
+  //   BoringUtils.addSource(getVec.reduce(_ || _), "TMA_l2handleget")
   }
   io.l3miss := missVec.reduce(_ || _)
 
